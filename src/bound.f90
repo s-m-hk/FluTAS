@@ -19,7 +19,7 @@ module mod_bound
     use mod_common_mpi, only: MPI_PROC_NULL,left,right,front,back,top,bottom
     !
     ! imposes velocity boundary conditions 
-    ! on an arbitrary stecil size
+    ! on an arbitrary stencil size
     !
     implicit none
     !
@@ -1005,12 +1005,14 @@ module mod_bound
         !$acc end kernels
       enddo
 #else
-      call MPI_SENDRECV(p(1      ,1-nh,1-nh),1,halo,left ,0, &
-                        p(nx+1   ,1-nh,1-nh),1,halo,right,0, &
+     do i = 0,nh-1
+      call MPI_SENDRECV(p(1+i    ,1-nh,1-nh),1,halo,left ,0, &
+                        p(nx+1+i ,1-nh,1-nh),1,halo,right,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
-      call MPI_SENDRECV(p(nx+1-nh,1-nh,1-nh),1,halo,right,0, &
-                        p(1-nh   ,1-nh,1-nh),1,halo,left ,0, &
+      call MPI_SENDRECV(p(nx-i   ,1-nh,1-nh),1,halo,right,0, &
+                        p(0-i    ,1-nh,1-nh),1,halo,left ,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
+     enddo
 #endif
     case(2) ! y direction
 #if defined(_OPENACC)
@@ -1050,12 +1052,14 @@ module mod_bound
         !$acc end kernels
       enddo
 #else
-      call MPI_SENDRECV(p(1-nh,1      ,1-nh),1,halo,front,0, &
-                        p(1-nh,ny+1   ,1-nh),1,halo,back ,0, &
+     do j = 0,nh-1
+      call MPI_SENDRECV(p(1-nh, 1+j    ,1-nh),1,halo,front,0, &
+                        p(1-nh, ny+1+j ,1-nh),1,halo,back ,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
-      call MPI_SENDRECV(p(1-nh,ny+1-nh,1-nh),1,halo,back ,0, &
-                        p(1-nh,1-nh   ,1-nh),1,halo,front,0, &
+      call MPI_SENDRECV(p(1-nh, ny-j, 1-nh),1,halo,back ,0, &
+                        p(1-nh, 0-j , 1-nh),1,halo,front,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
+     enddo
 #endif
     case(3) ! z direction
 #if defined(_OPENACC)
@@ -1095,12 +1099,14 @@ module mod_bound
         !$acc end kernels
       enddo
 #else
-     call MPI_SENDRECV(p(1-nh,1-nh   ,1   ),1,halo,bottom,0, &
-                       p(1-nh,1-nh   ,nz+1),1,halo,top   ,0, &
-                       comm_cart,MPI_STATUS_IGNORE,ierr)
-     call MPI_SENDRECV(p(1-nh,1-nh,nz+1-nh),1,halo,top   ,0, &
-                       p(1-nh,1-nh   ,1-nh),1,halo,bottom,0, &
-                       comm_cart,MPI_STATUS_IGNORE,ierr)
+     do k = 0,nh-1
+      call MPI_SENDRECV(p(1-nh, 1-nh, 1+k   ),1,halo,bottom,0, &
+                        p(1-nh, 1-nh, nz+1+k),1,halo,top   ,0, &
+                        comm_cart,MPI_STATUS_IGNORE,ierr)
+      call MPI_SENDRECV(p(1-nh, 1-nh, nz-k),1,halo,top   ,0, &
+                        p(1-nh, 1-nh, 0-k),1,halo,bottom ,0, &
+                        comm_cart,MPI_STATUS_IGNORE,ierr)
+     enddo
 #endif
     !
     end select

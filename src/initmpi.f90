@@ -5,15 +5,15 @@ module mod_initmpi
   !
   use mpi
   use decomp_2d
-#if defined(_OPENACC)
-  use mod_common_mpi, only: mydev
-  use mod_common_mpi, only: xsl_buf, xrl_buf, xsr_buf, xrr_buf, &
-                            ysr_buf, yrr_buf, ysl_buf, yrl_buf, &
-                            zsr_buf, zrr_buf, zsl_buf, zrl_buf
-#endif
   use mod_common_mpi, only: myid,comm_cart,ierr, &
-                            left,right,front,back,top,bottom
-  use mod_common_mpi, only: ijk_start,ijk_start_x,ijk_start_y,ijk_start_z, &
+                            left,right,front,back,top,bottom, &
+#if defined(_OPENACC)
+                            mydev, &
+                            xsl_buf, xrl_buf, xsr_buf, xrr_buf, &
+                            ysr_buf, yrr_buf, ysl_buf, yrl_buf, &
+                            zsr_buf, zrr_buf, zsl_buf, zrl_buf, &
+#endif
+                            ijk_start,ijk_start_x,ijk_start_y,ijk_start_z, &
                             n_x,n_y,n_z,ipencil
   use mod_types
   !@cuf use cudafor

@@ -2,7 +2,6 @@
 
 ARCH ?= generic
 APP ?= basic
-USE_FAST_KERNELS ?= 0
 
 include targets/target.$(ARCH)
 include apps/$(APP)/app.$(APP)
@@ -83,7 +82,7 @@ endif
 ifeq ($(HEAT_TRANSFER),1) 
 	DFLAGS += -D_HEAT_TRANSFER
 ifeq ($(BOUSSINESQ),1)
-        DFLAGS += -D_BOUSSINESQ
+    DFLAGS += -D_BOUSSINESQ
 endif
 	OBJS += gradls.o moms.o rks.o cmpt_divth.o
 endif
@@ -93,6 +92,15 @@ ifeq ($(USE_VOF),1)
 	OBJS += vof.o mom.o funcs.o
 else
 	OBJS += mom.o funcs.o
+endif
+
+ifeq ($(USE_IBM),1) 
+	OBJS += initibm.o ibm.o
+ifeq ($(USE_CONTACTANGLE),1)
+	OBJS += contactangle.o setangle.o 
+    DFLAGS += -D_USE_CONTACTANGLE
+endif
+	DFLAGS += -D_USE_IBM
 endif
 
 ifeq ($(USE_NVTX),1)  

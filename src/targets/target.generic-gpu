@@ -3,18 +3,18 @@
 # NVFORTRAN (cpu/gpu version)
 #
 CPP_FLAGS := -cpp 
-CC        := nvc++
-FC        := mpif90 
+CC        := mpicc
+FC        := mpifort 
 ifeq ($(DO_DBG),1)
   DBG       := -Minform=inform -Mchkstk -g -O0 -traceback -Mbounds
 else
-  OPT       := -Minfo=accel -fast
+  OPT       := -Minfo=accel -fast -O3
 endif
 PRE       := #-r8
 
 # Take all the compiler flags together
 FFLAGS  := $(OPT) $(DBG) $(PRE)
-DFLAGS  := -D_TIMING -D_EPA2A -D_DECOMP_X #-D_TWOD
+DFLAGS  := -D_EPA2A -D_DECOMP_Z #-D_TIMING -D_TWOD
 DFLAGS  += #-D_OVERWRITE -D_EVEN # FFLAGS_2DECOMP
 LDFLAGS :=
 
@@ -25,10 +25,10 @@ LDFLAGS :=
 USE_NVTX = 0
 
 # Required for FFTW
-FFTW_HOME := /data/nicolos/libraries/fftw-3.3.9
+FFTW_HOME := /lscratch/smhk2/Software/AMD/amd-fftw
 LDFLAGS   += -L${FFTW_HOME}/lib -lfftw3
 
-FFLAGS    += -cuda -acc -gpu=cc70,cuda11.0 -cudalib=cufft,curand 
+FFLAGS    += -cuda -acc -gpu=cc86,cuda11.4,lineinfo -cudalib=cufft,curand 
 DFLAGS    += -D_EPHC -D_GPU_MPI
 
 # Required for INIT_MONTECARLO

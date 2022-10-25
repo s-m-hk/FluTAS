@@ -385,7 +385,7 @@ module mod_initflow
 #endif   
   !
 #if defined(_USE_VOF)
-  subroutine init_surf_tension(nx,ny,nz,dxi,dyi,dzi,nh_d,dzci,kappa,psi,rho, &
+  subroutine init_surf_tension(nx,ny,nz,dxi,dyi,dzi,nh_d,nh_v,dzci,kappa,psi,rho, &
                                ssx_o,ssy_o,ssz_o,ssx,ssy,ssz)
     !
     ! computes initial conditions for the surface tension
@@ -396,9 +396,10 @@ module mod_initflow
     !
     integer , intent(in )                      :: nx,ny,nz
     real(rp), intent(in )                      :: dxi,dyi,dzi
-    integer , intent(in )                      :: nh_d
+    integer , intent(in )                      :: nh_d,nh_v
     real(rp), intent(in ), dimension(1-nh_d:)  :: dzci
-    real(rp), intent(in ), dimension(0:,0:,0:) :: kappa,psi,rho
+    real(rp), intent(in ), dimension(0:,0:,0:) :: kappa,rho
+    real(rp), intent(in ), dimension(1-nh_v:,1-nh_v:,1-nh_v:) :: psi
     real(rp), intent(out), dimension(0:,0:,0:) :: ssx_o,ssy_o,ssz_o,ssx,ssy,ssz
     !
     real(rp) :: rhox,rhoy,rhoz,kappasx,kappasy,kappasz

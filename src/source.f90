@@ -24,20 +24,22 @@ module mod_source
   contains
   !
 #if defined(_USE_VOF)
-  subroutine surft_src(nx,ny,nz,nh_d,nh_u,f_t12,dxi,dyi,dzi,dzci,kappa,psi,rho,u,v,w)
+  subroutine surft_src(nx,ny,nz,nh_d,nh_u,nh_v,f_t12,dxi,dyi,dzi,dzci,kappa,psi,rho,u,v,w)
     !
-    use mod_param, only: sigma
+    use mod_param, only: sigma,small
     !
     implicit none 
     !
     integer , intent(in   )                                     :: nx,ny,nz
-    integer , intent(in   )                                     :: nh_d,nh_u
+    integer , intent(in   )                                     :: nh_d,nh_u,nh_v
     real(rp), intent(in   )                                     :: f_t12
     real(rp), intent(in   )                                     :: dxi,dyi,dzi
     real(rp), intent(in   ), dimension(1-nh_d:)                 :: dzci
-    real(rp), intent(in   ), dimension(0:,0:,0:)                :: kappa,psi,rho
+    real(rp), intent(in   ), dimension(0:,0:,0:)                :: kappa,rho
+    real(rp), intent(in   ), dimension(1-nh_v:,1-nh_v:,1-nh_v:) :: psi
     real(rp), intent(inout), dimension(1-nh_u:,1-nh_u:,1-nh_u:) :: u,v,w
     !
+    real(rp) :: wi,wip,ti,tip,wj,wjp,tj,tjp,wk,wkp,tk,tkp
     real(rp) :: kappax,kappay,kappaz
     real(rp) :: rhox,rhoy,rhoz
     integer  :: i,j,k,ip,jp,kp
@@ -55,9 +57,25 @@ module mod_source
           rhox   = 0.5_rp*(rho(ip,j,k)+rho(i,j,k))
           rhoy   = 0.5_rp*(rho(i,jp,k)+rho(i,j,k))
           rhoz   = 0.5_rp*(rho(i,j,kp)+rho(i,j,k))
-          kappax = 0.5_rp*(kappa(ip,j,k)+kappa(i,j,k))
-          kappay = 0.5_rp*(kappa(i,jp,k)+kappa(i,j,k))
-          kappaz = 0.5_rp*(kappa(i,j,kp)+kappa(i,j,k))
+          !
+          ti  = max(1.0_rp - psi(i ,j,k), small)
+          tj  = ti
+          tk  = tj
+          tip = max(1.0_rp - psi(ip,j,k), small)
+          tjp = max(1.0_rp - psi(i,jp,k), small)
+          tkp = max(1.0_rp - psi(i,j,kp), small)
+          wi  = sqrt(psi(i ,j,k)*ti )
+          wip = sqrt(psi(ip,j,k)*tip)
+          wj  = sqrt(psi(i,j ,k)*tj )
+          wjp = sqrt(psi(i,jp,k)*tjp)
+          wk  = sqrt(psi(i,j,k )*tk )
+          wkp = sqrt(psi(i,j,kp)*tkp)
+          kappax = (wi*kappa(i,j,k) + wip*kappa(ip,j,k))/max(wi + wip, small)
+          kappay = (wj*kappa(i,j,k) + wjp*kappa(i,jp,k))/max(wj + wjp, small)
+          kappaz = (wk*kappa(i,j,k) + wkp*kappa(i,j,kp))/max(wk + wkp, small)
+          ! kappax = 0.5_rp*(kappa(ip,j,k)+kappa(i,j,k))
+          ! kappay = 0.5_rp*(kappa(i,jp,k)+kappa(i,j,k))
+          ! kappaz = 0.5_rp*(kappa(i,j,kp)+kappa(i,j,k))
           !
           u(i,j,k) = u(i,j,k) + f_t12*(sigma*kappax*(psi(ip,j,k)-psi(i,j,k))/rhox)*dxi
           v(i,j,k) = v(i,j,k) + f_t12*(sigma*kappay*(psi(i,jp,k)-psi(i,j,k))/rhoy)*dyi

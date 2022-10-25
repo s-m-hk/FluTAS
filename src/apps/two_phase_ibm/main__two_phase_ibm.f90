@@ -15,7 +15,6 @@
 program flutas
   !
   ! module declaration 
-  !  note: --> import what you really neeed 
   !
   use iso_c_binding , only: C_PTR
   use mpi
@@ -57,6 +56,9 @@ program flutas
                             n,ng,l,dl,dli, &
                             bulk_ftype,rkcoeff, &
                             time_scheme,space_scheme_mom,n_stage, &
+#if defined(_USE_IBM)
+                            zmax_ibm, &
+#endif
                             read_input
   !
 #if defined(_DO_POSTPROC) && defined(_USE_VOF)
@@ -76,7 +78,7 @@ program flutas
   use mod_solver_cpu, only: solver_cpu
 #endif
   use mod_types
-  use mod_vof       , only: initvof,advvof,update_vof,update_property
+  use mod_vof       , only: initvof,advvof,update_vof,update_property,update_property_harmonic
   use profiler
 #if defined(_DO_POSTPROC)
   use mod_tagging   , only: droplet_tagging
@@ -84,6 +86,9 @@ program flutas
 #if defined(_USE_IBM)
   use mod_initIBM
   use mod_IBM        , only: Penalization_face,Wetting_radius
+#if defined(_USE_CONTACTANGLE)
+  use mod_setangle
+#endif
 #endif
   !@cuf use mod_common_mpi, only: mydev
   !@cuf use cudafor
@@ -112,7 +117,14 @@ program flutas
   real(rp), allocatable, dimension(:,:) :: lambdaxyp
   real(rp), allocatable, dimension(:)   :: ap,bp,cp
   real(rp) :: normfftp
-  ! 
+  !
+#if defined(_USE_IBM)
+  real(rp),dimension(:,:,:),allocatable :: cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag
+  integer,dimension(:,:,:),allocatable:: Level_set,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
+  real(rp),dimension(:,:,:),allocatable:: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
+  real(rp),dimension(:,:,:,:),allocatable:: WP1,WP2
+#endif
+  !
   real(rp), allocatable, dimension(:,:,:) :: rhsbp_x, rhsbp_y, rhsbp_z
   !
   real(rp), dimension(3) :: f
@@ -122,10 +134,10 @@ program flutas
   real(rp) :: dt12,dt12av,dt12min,dt12max
 #endif
   !
-  integer, dimension(3)   :: halo_u,halo_p,halo_d,halo_v
+  integer, dimension(3)   :: halo_u,halo_p,halo_d,halo_v,halo_b
   integer, dimension(3)   :: dims
   integer, dimension(3,3) :: dims_xyz
-  integer  :: nh_d,nh_u,nh_p,nh_v
+  integer  :: nh_d,nh_u,nh_p,nh_v,nh_b
   !
   integer  :: i,j,k,im,ip,jm,jp,km,kp
   integer  :: irk,istep
@@ -152,6 +164,12 @@ program flutas
   !@cuf attributes(managed) :: zc_g, zf_g
   !@cuf attributes(managed) :: lambdaxyp, ap, bp, cp, rhsbp_x, rhsbp_y, rhsbp_z
   !@cuf attributes(managed) :: dudtrko, dvdtrko, dwdtrko
+#if defined(_USE_IBM)
+  !@cuf attributes(managed) :: cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag
+  !@cuf attributes(managed) :: Level_set,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
+  !@cuf attributes(managed) :: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
+  !@cuf attributes(managed) :: WP1,WP2
+#endif
   !
   !if we don't use dropcheck.f90 we can comment the next line  
   real(rp) :: xd,yd,zd,ut,vt,wt,zcd,ycd,xcd,vol
@@ -206,14 +224,16 @@ program flutas
   !
   nh_u = 1
   nh_p = 1
-  nh_v = 1
   !
-  nh_d = max(nh_u,nh_p,nh_v) ! take the maximum of the previous ones
 #if defined(_USE_IBM)
+  nh_v = 6
   nh_b = 6
 #else
-  nh_b = nh_d
+  nh_v = 1
+  nh_b = 1
 #endif
+  !
+  nh_d = max(nh_u,nh_p,nh_b,nh_v)  ! take the maximum of the previous ones
   !
   ! allocate memory
   !
@@ -225,7 +245,7 @@ program flutas
   allocate(dudtrko(n(1),n(2),n(3)), &
            dvdtrko(n(1),n(2),n(3)), &
            dwdtrko(n(1),n(2),n(3)))
-  allocate(psi(    1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b)   , &
+  allocate(psi(    1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v)   , &
            kappa(  0:n(1)+1,0:n(2)+1,0:n(3)+1)   , &
            mu(     0:n(1)+1,0:n(2)+1,0:n(3)+1)   , &
            rho(    0:n(1)+1,0:n(2)+1,0:n(3)+1)   , &
@@ -255,9 +275,6 @@ program flutas
               cell_w_tag(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
             cell_phi_tag(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
                Level_set(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
-                i_mirror(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
-                j_mirror(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
-                k_mirror(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
                    i_IP1(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
                    j_IP1(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
                    k_IP1(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
@@ -309,6 +326,20 @@ program flutas
   !@cuf istat = cudaMemAdvise(cell_v_tag, size(cell_v_tag), cudaMemAdviseSetReadMostly, mydev)
   !@cuf istat = cudaMemAdvise(cell_w_tag, size(cell_w_tag), cudaMemAdviseSetReadMostly, mydev)
   !@cuf istat = cudaMemAdvise(cell_phi_tag, size(cell_phi_tag), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(Level_set, size(Level_set), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(nx_surf, size(nx_surf), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(ny_surf, size(ny_surf), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(nz_surf, size(nz_surf), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(nabs_surf, size(nabs_surf), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(deltan, size(deltan), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(i_IP1, size(i_IP1), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(i_IP2, size(i_IP2), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(j_IP1, size(j_IP1), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(j_IP2, size(j_IP2), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(k_IP1, size(k_IP1), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(k_IP2, size(k_IP2), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(WP1, size(WP1), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(WP2, size(WP2), cudaMemAdviseSetReadMostly, mydev)
 #endif
   !
   if(myid.eq.0) print*, '************************************************'
@@ -326,9 +357,6 @@ program flutas
   ! Allocate buffers for halo communications (GPU-only)
   !
   call alloc_buf(n,nh_d)
-#if defined(_USE_IBM)
-  call alloc_buf_large(n,nh_b)
-#endif
   !
 #else
   !
@@ -398,7 +426,8 @@ program flutas
       !
       ! Initialize VoF 
       !
-      call initvof(n,dli,psi)
+      call initvof(n,nh_v,dli,psi)
+      !@cuf istat = cudaMemPrefetchAsync(p, size(psi), mydev, 0)
       call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,psi)
       !
     else
@@ -424,21 +453,35 @@ program flutas
       enddo
     enddo
     !$acc end kernels
-    !
 #if defined(_USE_IBM)
-    !@cuf istat = cudaMemPrefetchAsync(cell_u_tag,   size(cell_u_tag),   cudaCpuDeviceId, 0)
-    !@cuf istat = cudaMemPrefetchAsync(cell_v_tag,   size(cell_v_tag),   cudaCpuDeviceId, 0)
-    !@cuf istat = cudaMemPrefetchAsync(cell_w_tag,   size(cell_w_tag),   cudaCpuDeviceId, 0)
-    !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), cudaCpuDeviceId, 0)
-    call initIBM(restart,cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag,Level_set, &
-                 nx_surf,ny_surf,nz_surf,nabs_surf,i_mirror,j_mirror,k_mirror, &
+    call initIBM(cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag,Level_set, &
+                 nx_surf,ny_surf,nz_surf,nabs_surf, &
                  i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,deltan, &
-                 nx_surf_nonnorm,ny_surf_nonnorm,nz_surf_nonnorm, &
-                 0,dzc,dzf)
-    !@cuf istat = cudaMemPrefetchAsync(cell_u_tag,   size(cell_u_tag),   mydev, 0)
-    !@cuf istat = cudaMemPrefetchAsync(cell_v_tag,   size(cell_v_tag),   mydev, 0)
-    !@cuf istat = cudaMemPrefetchAsync(cell_w_tag,   size(cell_w_tag),   mydev, 0)
-    !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), mydev, 0)
+                 nh_d,nh_b,halo_b,&
+                 zc,zf,dzc,dzf,dl,dli)
+    !$acc kernels 
+    do k=1,n3
+      do j=1,n2
+        do i=1,n1
+          psi(i,j,k) = (1.0_rp - cell_phi_tag(i,j,k))*psi(i,j,k)
+        end do
+      end do
+    end do
+    !$acc end kernels
+    !$acc kernels 
+    do k=1,n3
+      do j=1,n2
+        do i=1,n1
+        if(zc(k).ge.(zmax_ibm-2.0_rp*dz)) psi(i,j,k) = 0.0_rp
+        end do
+      end do
+    end do
+    !$acc end kernels
+    !@cuf istat = cudaMemPrefetchAsync(p, size(psi), mydev, 0)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,psi)
+#if defined(_USE_CONTACTANGLE)
+    call setangle(n,dl,psi,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,0,u,v,w,zc,dzc)
+#endif
 #endif
     !
     if(myid.eq.0) print*, '*** Initial condition successfully set ***'
@@ -455,6 +498,13 @@ program flutas
     call load(action_load,trim(restart_dir)//'fldp.bin',n,      p(1:n(1),1:n(2),1:n(3)))
     call load(action_load,trim(restart_dir)//'fldpsi.bin',n,    psi(1:n(1),1:n(2),1:n(3)))
     call load_scalar(action_load,trim(restart_dir)//'scalar.out',time,istep,dto)
+#if defined(_USE_IBM)
+    call initIBM(cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag,Level_set, &
+                 nx_surf,ny_surf,nz_surf,nabs_surf, &
+                 i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,deltan, &
+                 nh_d,nh_b,halo_b,&
+                 zc,zf,dzc,dzf,dl,dli)
+#endif
     !
     if(myid.eq.0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
     !
@@ -487,11 +537,12 @@ program flutas
   !
   ! update the quantities derived from VoF using the latest available VoF field
   !
-  call update_vof(n,dli,nh_d,dzc,dzf,nh_v,halo_v,psi,nor,cur_t,kappa,d_thinc)
-  call update_property(n,(/rho1,rho2/),psi,rho)
-  call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,rho)
-  call update_property(n,(/mu1 ,mu2 /),psi,mu ) 
-  call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,mu)
+  call update_vof(n,dli,nh_d,dzc,dzf,nh_p,nh_v,halo_p,psi,nor,cur_t,kappa,d_thinc)
+  call update_property(n,nh_v,(/rho1,rho2/),psi,rho)
+  call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,rho)
+  ! call update_property(n,nh_v,(/mu1 ,mu2 /),psi,mu)
+  call update_property_harmonic(n,nh_v,(/mu1,mu2/),psi,mu)
+  call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,mu)
   !
   ! post-process and write initial condition
 #if !defined(_BENCHMARK_NO_IO)
@@ -509,6 +560,13 @@ program flutas
   include 'out1d.h90'
   include 'out2d.h90'
   include 'out3d.h90'
+#if defined(_USE_IBM)
+  !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), cudaCpuDeviceId, 0)
+  call write_visu_3d(datadir,'sol_fld_'//fldnum//'.bin','log_visu_3d.out','sol', &
+                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
+                     cell_phi_tag(1:n(1),1:n(2),1:n(3)))
+  !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), mydev, 0)
+#endif
   !
   ! Prefetching post IO
   !@cuf istat = cudaMemPrefetchAsync(u, size(u), mydev, 0)
@@ -596,13 +654,14 @@ program flutas
     !
     if(late_init.and.(istep.eq.i_late_init)) then
       !
-      call initvof(n,dli,psi)
-      call update_vof(n,dli,nh_d,dzc,dzf,nh_v,halo_v,psi,nor,cur_t,kappa,d_thinc)
+      call initvof(n,nh_v,dli,psi)
+      call update_vof(n,dli,nh_d,dzc,dzf,nh_p,nh_v,halo_p,psi,nor,cur_t,kappa,d_thinc)
       !
-      call update_property(n,(/mu1 ,mu2 /),psi,mu ) 
-      call update_property(n,(/rho1,rho2/),psi,rho)
-      call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,mu )
-      call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,rho)
+      ! call update_property(n,nh_v,(/mu1 ,mu2 /),psi,mu )
+      call update_property_harmonic(n,nh_v,(/mu1,mu2/),psi,mu)
+      call update_property(n,nh_v,(/rho1,rho2/),psi,rho)
+      call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_p,dl,dzc,dzf,mu )
+      call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_p,dl,dzc,dzf,rho)
       call chkdt_tw(n(1),n(2),n(3),dxi,dyi,dzi,nh_d,nh_u,dzci,dzfi,u,v,w,dtmax)
       !
     endif
@@ -622,12 +681,18 @@ program flutas
       !
       call profiler_start("VOF", tag = .true., tag_color = COLOR_YELLOW)
       !
-      call advvof(n,dli,dt,halo_v,nh_d,nh_u,dzc,dzf,u,v,w,psi,nor,cur_t,kappa,d_thinc)
+      call advvof(n,dl,dli,dt,halo_p,halo_v,nh_d,nh_u,nh_v,zc,dzc,dzf,u,v,w,psi,nor,cur_t,kappa,d_thinc, &
+#if defined(_USE_IBM)
+                  nabs_surf,nx_surf,ny_surf,nz_surf,deltan, &
+                  i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2, &
+#endif
+                  0)
       !
-      call update_property(n,(/rho1,rho2/),psi,rho)           
-      call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,rho)
-      call update_property(n,(/mu1 ,mu2 /),psi,mu )           
-      call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,mu )
+      call update_property(n,nh_v,(/rho1,rho2/),psi,rho)           
+      call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,rho)
+      ! call update_property(n,nh_v,(/mu1,mu2/),psi,mu)
+      call update_property_harmonic(n,nh_v,(/mu1,mu2/),psi,mu)      
+      call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,mu )
       !
       call profiler_stop("VOF")
       !
@@ -660,7 +725,7 @@ program flutas
     !
     ! --> add the surface tension forces
     !
-    call surft_src(n(1),n(2),n(3),nh_d,nh_u,f_t12,dxi,dyi,dzi,dzci,kappa,psi,rho,u,v,w)
+    call surft_src(n(1),n(2),n(3),nh_d,nh_u,nh_v,f_t12,dxi,dyi,dzi,dzci,kappa,psi,rho,u,v,w)
 #endif
 #if defined(_TURB_FORCING)
     !
@@ -679,6 +744,9 @@ program flutas
       dpdl_c(1:3) = dpdl_c(1:3) + f(1:3) 
     endif
     !
+#if defined(_USE_IBM)
+    call Penalization_face(u,v,w,cell_u_tag,cell_v_tag,cell_w_tag)
+#endif
     call bounduvw(cbcvel,n,bcvel,nh_d,nh_u,halo_u,no_outflow,dl,dzc,dzf,u,v,w) ! we impose bc at end (not valid for all cases)
     !
     call profiler_stop("RK")
@@ -705,10 +773,6 @@ program flutas
     !$OMP END PARALLEL DO
 #endif
     call boundp(cbcpre,n,bcpre,nh_d,nh_p,halo_p,dl,dzc,dzf,pold)
-    !
-#if defined(_USE_IBM)
-    call Penalization_face(up,vp,wp,cell_u_tag,cell_v_tag,cell_w_tag)
-#endif
     !
     call fillps(n(1),n(2),n(3),nh_d,nh_u,dxi,dyi,dzi,dzfi,f_t12_i,rho0,u,v,w,p)
     !
@@ -797,22 +861,22 @@ program flutas
       endif
       !
       if(myid.eq.0) print*, 'dtmax = ', dtmax, 'dt = ',dt
-      if(dtmax.lt.small) then
-        if(myid.eq.0) print*, 'ERROR: timestep is too small.'
-        if(myid.eq.0) print*, 'Aborting...'
-        is_done = .true.
-        kill = .true.
-      endif
+      ! if(dtmax.lt.small) then
+        ! if(myid.eq.0) print*, 'ERROR: timestep is too small.'
+        ! if(myid.eq.0) print*, 'Aborting...'
+        ! is_done = .true.
+        ! kill = .true.
+      ! endif
       dti = 1._rp/dt
       !
       if(myid.eq.0) print*, 'checking the velocity divergence ...'
       call chkdiv(n(1),n(2),n(3),dxi,dyi,dzi,nh_d,nh_u,dzfi,u,v,w,divtot,divmax)
-      if(divmax.gt.small.or.divtot.ne.divtot) then
-        if(myid.eq.0) print*, 'ERROR: maximum divergence is too large.'
-        if(myid.eq.0) print*, 'Aborting...'
-        is_done = .true.
-        kill = .true.
-      endif
+      ! if(divmax.gt.small.or.divtot.ne.divtot) then
+        ! if(myid.eq.0) print*, 'ERROR: maximum divergence is too large.'
+        ! if(myid.eq.0) print*, 'Aborting...'
+        ! is_done = .true.
+        ! kill = .true.
+      ! endif
       !
     endif
     !
@@ -866,6 +930,12 @@ program flutas
       !
     endif
     !
+#if defined(_USE_IBM)
+    ! call Wetting_radius(time,nabs_surf,psi,deltan, &
+                        ! i_IP1,j_IP1,k_IP1, &
+                        ! i_IP2,j_IP2,k_IP2,WP1,WP2, &
+                        ! dzc,dims)
+#endif
 #if defined(_DO_POSTPROC)
     if(mod(istep,iout0d_ta).eq.0.and.do_tagging) then
       call droplet_tagging(n,dims,datadir_ta,dl,nh_d,nh_v,nh_u,halo_v,dzc,dzf,psi,u,v,w,istep,time)

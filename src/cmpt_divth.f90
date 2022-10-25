@@ -91,7 +91,7 @@ module mod_cmpt_divth
     return
   end subroutine cmpt_divth
   !
-  subroutine cmpt_density(nx,ny,nz,dx,dy,dz,nh_t,p0,ri,rho2,psi,tmp,gas_mass,flag,rho0,rho)
+  subroutine cmpt_density(nx,ny,nz,dx,dy,dz,nh_t,nh_t,p0,ri,rho2,psi,tmp,gas_mass,flag,rho0,rho)
     !
     implicit none
     !
@@ -99,7 +99,7 @@ module mod_cmpt_divth
     real(rp), intent(in )                                     :: dx,dy,dz
     integer , intent(in )                                     :: nh_t
     real(rp), intent(in )                                     :: p0,ri,rho2
-    real(rp), intent(in ), dimension(     0:,     0:,     0:) :: psi
+    real(rp), intent(in ), dimension(1-nh_v:,1-nh_v:,1-nh_v:) :: psi
     real(rp), intent(in ), dimension(1-nh_t:,1-nh_t:,1-nh_t:) :: tmp 
     real(rp), intent(out)                                     :: gas_mass
     logical , intent(in)                                      :: flag

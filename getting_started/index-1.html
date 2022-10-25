@@ -1,0 +1,42 @@
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/><title>Unknown </title></head><body>
+<h1 id="how-to-visualize-the-output-binary-files">how to visualize the output binary files</h1>
+<h3 id="the-easy-way">the easy way</h3>
+<p>In addition to the binary files for visualization, the code now generates a log file that contains information about the saved data (see <code>out2d.h90</code> and <code>out3d.h90</code> for more details); this new approach uses that log file to generate the <code>Xdmf</code> visualization file.</p>
+<p>The steps are as follows:</p>
+<ol>
+<li>after the simulation has run, copy the contents of <code>utils/visualize_fields/gen_xdmf_easy/write_xdmf.py</code> to the simulation <code>data</code> folder;</li>
+<li>run the file with <code>python write_xdmf.py</code> in the <code>data</code> folder. If successful, this operation generates <code>viewfld_DNS.xmf</code> or <code>viewfld_DNS_2d.xmf</code> (see below) in the same folder;</li>
+<li>load the generated Xdmf (<code>*.xmf</code>) file using paraview/visit or other visualization software, i.e., on the command line <code>paraview viewfld_DNS.xmf</code>. If requested, choose XDMF Reader in Paraview!</li>
+</ol>
+<h2 id="example-how-to-visualize-the-default-binary-output">example: how to visualize the default binary output</h2>
+<h3 id="3d-fields">3D fields</h3>
+<p>when running the script, <code>write_xdmf.py</code> we get the following prompts:</p>
+<p>~~~
+ $ python write_xdmf.py
+ Name of the log file written by FluTAS [log_visu_3d.out]:
+ Name to be appended to the grid files to prevent overwriting []:
+ Name of the output file [viewfld_DNS.xmf]:
+~~~</p>
+<ul>
+<li>the first value is the name of the file that logged the saved data;</li>
+<li>the second is a name to append to the grid files that are generated, which should change for different log files to prevent conflicts;</li>
+<li>the third is the name of the visualization file.</li>
+</ul>
+<p>By pressing <kbd>enter</kbd> three times, the default values in the square brackets are assumed by the script; these correspond to the default steps required for visualizing 3D field data.</p>
+<h3 id="2d-fields">2D fields</h3>
+<p>the procedure for visualizing 2D field data that is saved in <code>out2d.h90</code> is exactly the same; it is just that the correct log file should be selected. The code saves by default field data in a plane of constant <code>y=ly/2</code>, and logs the saves to a file named <code>log_visu_2d_slice_1.out</code>. If more planes are saved, the user should make sure that one log file per plane is saved by the code (e.g. if another plane is saved, the log file written in <code>out2d.h90</code> could be named <code>log_visu_2d_slice_2.out</code>); see <code>out2d.h90</code> for more details. The corresponding steps to generate the Xdmf file would be, for instance:</p>
+<p>~~~
+ $ python write_xdmf.py
+ Name of the log file written by FluTAS [log_visu_3d.out]: log_visu_2d_slice_1.out
+ Name to be appended to the grid files to prevent overwriting []: 2d
+ Name of the output file [viewfld_DNS.xmf]: viewfld_DNS_2d.xmf
+~~~</p>
+<h2 id="alternative-approach">Alternative Approach</h2>
+<p>The code performs output through the library 2DECOMP, which dumps one binary file for each field. The results can be then visualized through the files available in the folder <code>src/data/</code>. To do so:</p>
+<ol>
+<li>Copy in the folder <code>src/data/</code> the following files: <code>param.h90</code>, <code>genview.sh</code> and <code>gen_xdmf.f90</code>. If you do not have them, you can take those files from one of the examples, e.g.: cp ../../examples/two_phase_inc_isot/rising_bubble_3d/visu_ex/* .</li>
+<li>Change <code>param.h90</code> consistently with the input files (the .in files) and the number of fields you want to visualize;</li>
+<li>On the command line, type: <code>./genview.sh</code>. This command generates a file (viewfld.xdmf) in the same directory;</li>
+<li>To open it, type on the command line <code>paraview viewfld.xdmf</code>.</li>
+</ol>
+</body></html>

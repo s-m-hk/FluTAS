@@ -10,7 +10,7 @@
 !=======================================================================
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  ! Halo cell support for neighbouring pencils to exchange data
+  ! Halo cell support for neighboring pencils to exchange data
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   subroutine update_halo_real(in, out, level, opt_decomp, opt_global)
 

@@ -35,48 +35,64 @@ module mod_vof
                                                         rpp,rpp,0.0_rp/),shape(xpp))
   !@cuf attributes(managed) :: xmm, xmp, xpm, xpp
   !
-  real(rp), allocatable, dimension(:,:,:) :: dvof1,dvof2,flux
-  !@cuf attributes(managed) :: dvof1,dvof2,flux
+  real(rp), allocatable, dimension(:,:,:) :: dvof1,dvof2,dvof3,flux
+  !@cuf attributes(managed) :: dvof1,dvof2,dvof3,flux
   !
   private
-  public  :: advvof,update_vof,update_property,initvof
+  public  :: advvof,update_vof,update_property,update_property_harmonic,initvof
   !
   contains
   !
-  subroutine advvof(n,dli,dt,halo,nh_d,nh_u,dzc,dzf,ug,vg,wg,vof,nor,cur,kappa,d_thinc)
+  subroutine advvof(n,dl,dli,dt,halo_p,halo_v,nh_d,nh_u,nh_v,zc,dzc,dzf,ug,vg,wg,vof,nor,cur,kappa,d_thinc, &
+#if defined(_USE_IBM)
+                    nabs_surf,nx_surf,ny_surf,nz_surf,deltan, &
+                    i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2, &
+#endif
+                    dummy)
     !
     use mod_param, only: cbcvof,bcvof
     use mod_bound, only: boundp
+    use mod_setangle
     !
     ! VoF advection
     !
     implicit none
     !
+    integer , intent(in   )                                     :: dummy
     integer , intent(in   ), dimension(3)                       :: n
-    real(rp), intent(in   ), dimension(3)                       :: dli
+    real(rp), intent(in   ), dimension(3)                       :: dl,dli
     real(rp), intent(in   )                                     :: dt
-    integer , intent(in   ), dimension(3)                       :: halo
-    integer , intent(in   )                                     :: nh_d,nh_u
-    real(rp), intent(in   ), dimension(1-nh_d:)                 :: dzc,dzf
+    integer , intent(in   ), dimension(3)                       :: halo_p,halo_v
+    integer , intent(in   )                                     :: nh_d,nh_u,nh_v
+    real(rp), intent(in   ), dimension(1-nh_d:)                 :: zc,dzc,dzf
     real(rp), intent(in   ), dimension(1-nh_u:,1-nh_u:,1-nh_u:) :: ug,vg,wg ! interface velocity
-    real(rp), intent(inout), dimension(0:,0:,0:)                :: vof
+    real(rp), intent(inout), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
     real(rp), intent(inout), dimension(0:,0:,0:,1:)             :: nor,cur
     real(rp), intent(inout), dimension(0:,0:,0:)                :: kappa    ! curvature
     real(rp), intent(inout), dimension(0:,0:,0:)                :: d_thinc
+    ! IBM variables
+#if defined(_USE_IBM)
+    real(rp), intent(in), dimension(1-nh_v:,1-nh_v:,1-nh_v:) :: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
+    integer,  dimension(1-nh_v:,1-nh_v:,1-nh_v:), intent(in):: i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
+    real(rp), dimension(1-nh_v:,1-nh_v:,1-nh_v:,1:), intent(in):: WP1,WP2
+#endif
     !
-    real(rp), dimension(3) :: dl
     real(rp) :: dli1, dli2, dli3
     integer :: i,j,k,im,jm,km
     integer :: n1, n2, n3
-    !@cuf attributes(managed) :: nor, cur, kappa, d_thinc, vof, ug, vg, wg, dzc, dzf
+    !@cuf attributes(managed) :: nor, cur, kappa, d_thinc, vof, ug, vg, wg, dzc, dzf, zc
+#if defined(_USE_IBM)
+    !@cuf attributes(managed) :: nabs_surf,nx_surf,ny_surf,nz_surf,deltan
+    !@cuf attributes(managed) :: i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2
+#endif
     !
     ! we allocate dvof1, dvof2 and flux only once
     !
-    if(.not.allocated(dvof1)) allocate(dvof1(0:n(1)+1,0:n(2)+1,0:n(3)+1))
-    if(.not.allocated(dvof2)) allocate(dvof2(0:n(1)+1,0:n(2)+1,0:n(3)+1))
+    if(.not.allocated(dvof1)) allocate(dvof1(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v))
+    if(.not.allocated(dvof2)) allocate(dvof2(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v))
+    if(.not.allocated(dvof3)) allocate(dvof3(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v))
     if(.not.allocated(flux )) allocate(flux (0:n(1)+0,0:n(2)+0,0:n(3)+0))
     !
-    dl(:) = dli(:)**(-1)
     dli1 = dli(1)
     dli2 = dli(2)
     dli3 = dli(3)
@@ -84,12 +100,12 @@ module mod_vof
     n2 = n(2)
     n3 = n(3)
     !
-    ! TODO: prefetcing
+    ! TODO: prefetching
     !
     ! flux in x
     !
 #if !defined(_TWOD)
-    call cmpt_vof_flux(n(1), n(2), n(3),dli(1),dt,nh_u,vof,nor,cur,d_thinc,1,ug,flux) 
+    call cmpt_vof_flux(n(1), n(2), n(3),dli(1),dt,nh_u,nh_v,vof,nor,cur,d_thinc,1,ug,flux) 
 #endif
     !
     !$acc kernels
@@ -112,14 +128,19 @@ module mod_vof
     ! update vof
     !
 #if !defined(_TWOD)
-    call clip_vof(n,dvof1)
-    call boundp(cbcvof,n,bcvof,nh_d,+1,halo,dl,dzc,dzf,dvof1)
-    call update_vof(n,dli,nh_d,dzc,dzf,+1,halo,dvof1,nor,cur,kappa,d_thinc)
+#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE)
+    call clip_vof(n,nh_v,dvof1)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof1)
+    call setangle(n,dl,dvof1,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,1,ug,vg,wg,zc,dzc)
+#endif
+    call clip_vof(n,nh_v,dvof1)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof1)
+    call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,dvof1,nor,cur,kappa,d_thinc)
 #endif
     !
     ! flux in y
     !
-    call cmpt_vof_flux(n(1), n(2), n(3),dli(2),dt,nh_u,dvof1,nor,cur,d_thinc,2,vg,flux) 
+    call cmpt_vof_flux(n(1), n(2), n(3),dli(2),dt,nh_u,nh_v,dvof1,nor,cur,d_thinc,2,vg,flux) 
     !
     !$acc kernels
     do k=1,n3
@@ -136,13 +157,18 @@ module mod_vof
     !
     ! update vof
     !
-    call clip_vof(n,dvof2)
-    call boundp(cbcvof,n,bcvof,nh_d,+1,halo,dl,dzc,dzf,dvof2)
-    call update_vof(n,dli,nh_d,dzc,dzf,+1,halo,dvof2,nor,cur,kappa,d_thinc)
+#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE)
+    call clip_vof(n,nh_v,dvof2)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof2)
+    call setangle(n,dl,dvof2,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,2,ug,vg,wg,zc,dzc)
+#endif
+    call clip_vof(n,nh_v,dvof2)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof2)
+    call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,dvof2,nor,cur,kappa,d_thinc)
     !
     ! flux in z
     !
-    call cmpt_vof_flux(n(1), n(2), n(3),dli(3),dt,nh_u,dvof2,nor,cur,d_thinc,3,wg,flux) 
+    call cmpt_vof_flux(n(1), n(2), n(3),dli(3),dt,nh_u,nh_v,dvof2,nor,cur,d_thinc,3,wg,flux) 
     !
     !$acc kernels
     do k=1,n3
@@ -150,7 +176,7 @@ module mod_vof
         do i=1,n1
           km = k-1
           !
-          vof(i,j,k) = (dvof2(i,j,k)-(flux(i,j,k)-flux(i,j,km))*dli3)/(1.0_rp-dt*dli3*(wg(i,j,k)-wg(i,j,km)))
+          dvof3(i,j,k) = (dvof2(i,j,k)-(flux(i,j,k)-flux(i,j,km))*dli3)/(1.0_rp-dt*dli3*(wg(i,j,k)-wg(i,j,km)))
           !
         enddo
       enddo
@@ -159,9 +185,14 @@ module mod_vof
     !
     ! update vof
     !
-    call clip_vof(n,vof)
-    !call boundp(cbcvof,n,bcvof,nh_d,+1,halo,dl,dzc,dzf,vof) ! it can be skipped
-    !call update_vof(n,dli,nh_d,dzc,dzf,+1,halo,vof,nor,cur,kappa,d_thinc) ! it can be skipped
+#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE)
+    call clip_vof(n,nh_v,dvof3)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof3)
+    call setangle(n,dl,dvof3,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,3,ug,vg,wg,zc,dzc)
+#endif
+    call clip_vof(n,nh_v,dvof3)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof3) ! it can be skipped
+    call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,dvof3,nor,cur,kappa,d_thinc) ! it can be skipped
     !
     ! divergence correction step
     !
@@ -173,9 +204,9 @@ module mod_vof
           jm = j-1
           im = i-1
           !
-          vof(i,j,k) = vof(i,j,k) - dt*( dvof1(i,j,k)*dli1*(ug(i,j,k)-ug(im,j,k)) + &
-                                         dvof2(i,j,k)*dli2*(vg(i,j,k)-vg(i,jm,k)) + &
-                                           vof(i,j,k)*dli3*(wg(i,j,k)-wg(i,j,km)) )
+          vof(i,j,k) = dvof3(i,j,k) - dt*( dvof1(i,j,k)*dli1*(ug(i,j,k)-ug(im,j,k)) + &
+                                           dvof2(i,j,k)*dli2*(vg(i,j,k)-vg(i,jm,k)) + &
+                                           dvof3(i,j,k)*dli3*(wg(i,j,k)-wg(i,j,km)) )
           !
         enddo
       enddo
@@ -184,14 +215,22 @@ module mod_vof
     !
     ! update vof
     !
-    call clip_vof(n,vof)
-    call boundp(cbcvof,n,bcvof,nh_d,+1,halo,dl,dzc,dzf,vof)
-    call update_vof(n,dli,nh_d,dzc,dzf,+1,halo,vof,nor,cur,kappa,d_thinc)
+#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE)
+    ! call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,vof)
+    ! call setangle(n,dl,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,1,ug,vg,wg,zc,dzc)
+    ! call clip_vof(n,vof)
+    ! call setangle(n,dl,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,2,ug,vg,wg,zc,dzc)
+    ! call clip_vof(n,vof)
+    ! call setangle(n,dl,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,3,ug,vg,wg,zc,dzc)
+#endif
+    call clip_vof(n,nh_v,vof)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,vof)
+    call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,vof,nor,cur,kappa,d_thinc)
     !
     return
   end subroutine advvof
   !
-  subroutine update_vof(n,dli,nh_d,dzc,dzf,nh_p,halo,vof,nor,cur,kappa,d_thinc)
+  subroutine update_vof(n,dli,nh_d,dzc,dzf,nh_p,nh_v,halo_p,vof,nor,cur,kappa,d_thinc)
     !
     use mod_param, only: cbcvof,bcvof
     use mod_bound, only: boundp
@@ -202,9 +241,9 @@ module mod_vof
     real(rp), intent(in ), dimension(3)           :: dli
     integer , intent(in )                         :: nh_d
     real(rp), intent(in ), dimension(1-nh_d:)     :: dzc,dzf
-    integer , intent(in )                         :: nh_p
-    integer , intent(in ), dimension(3)           :: halo
-    real(rp), intent(in ), dimension(0:,0:,0:   ) :: vof
+    integer , intent(in )                         :: nh_p,nh_v
+    integer , intent(in ), dimension(3)           :: halo_p
+    real(rp), intent(in ), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
     real(rp), intent(out), dimension(0:,0:,0:,1:) :: nor
     real(rp), intent(out), dimension(0:,0:,0:,1:) :: cur
     real(rp), intent(out), dimension(0:,0:,0:   ) :: kappa
@@ -221,30 +260,31 @@ module mod_vof
     n3 = n(3)
     !
     !call cmpt_nor_curv_1o(n(1),n(2),n(3),dli,vof,nor,cur,kappa)
-    call cmpt_nor_curv_2o(n(1),n(2),n(3),dli,vof,nor,cur,kappa)
+    call cmpt_nor_curv_2o(n(1),n(2),n(3),nh_v,dli,vof,nor,cur,kappa)
     !
     do p=1,3
-      call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo,dl,dzc,dzf,nor(:,:,:,p))
+      call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,nor(:,:,:,p))
     enddo
     do p=1,6
-      call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo,dl,dzc,dzf,cur(:,:,:,p))
+      call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,cur(:,:,:,p))
     enddo
-    call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo,dl,dzc,dzf,kappa)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,kappa)
     !
-    call cmpt_d_thinc(n1, n2, n3,nor,cur,vof,d_thinc)
-    call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo,dl,dzc,dzf,d_thinc)
+    call cmpt_d_thinc(n1, n2, n3,nh_v,nor,cur,vof,d_thinc)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,d_thinc)
     !
     return
   end subroutine update_vof
   !
-  subroutine update_property(n,prop12,vof,prop)
+  subroutine update_property(n,nh_v,prop12,vof,prop)
     !
     implicit none
     !
-    integer , intent(in ), dimension(3)        :: n
-    real(rp), intent(in ), dimension(2)        :: prop12
-    real(rp), intent(in ), dimension(0:,0:,0:) :: vof
-    real(rp), intent(out), dimension(0:,0:,0:) :: prop
+    integer , intent(in ), dimension(3)                       :: n
+    real(rp), intent(in ), dimension(2)                       :: prop12
+    integer , intent(in )                                     :: nh_v
+    real(rp), intent(in ), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
+    real(rp), intent(out), dimension(0:,0:,0:)                :: prop
     !
     integer :: i,j,k
     integer :: n1, n2, n3
@@ -270,12 +310,47 @@ module mod_vof
     return
   end subroutine update_property
   !
-  subroutine clip_vof(n,vof)
+  subroutine update_property_harmonic(n,nh_v,prop12,vof,prop)
+    implicit none
+    !
+    integer , intent(in ), dimension(3)        :: n
+    real(rp), intent(in ), dimension(2)        :: prop12
+    integer , intent(in )                                     :: nh_v
+    real(rp), intent(in ), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
+    real(rp), intent(out), dimension(0:,0:,0:) :: prop
+    !
+    integer  :: i,j,k
+    integer  :: n1, n2, n3
+    real(rp) :: inv1, inv2
+    ! 
+    n1 = n(1)
+    n2 = n(2)
+    n3 = n(3)
+    !
+    inv1 = 1.0_rp/(prop12(1) + small)
+    inv2 = 1.0_rp/(prop12(2) + small)
+    !
+    !$acc parallel loop collapse(3)
+    do k=1,n3
+      do j=1,n2
+        do i=1,n1
+          prop(i,j,k) = 1.0_rp/(vof(i,j,k)*(inv2 - inv1) + inv1)
+        enddo
+      enddo
+    enddo
+    !$acc end parallel loop
+    !
+    return
+  end subroutine update_property_harmonic
+  !
+  !
+  subroutine clip_vof(n,nh_v,vof)
     !
     implicit none
     !
-    integer , intent(in   ), dimension(3)        :: n
-    real(rp), intent(inout), dimension(0:,0:,0:) :: vof
+    integer , intent(in   ), dimension(3)                       :: n
+    integer , intent(in )                                       :: nh_v
+    real(rp), intent(inout), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
     !
     integer :: i,j,k
     integer :: n1, n2, n3
@@ -285,9 +360,9 @@ module mod_vof
     n3 = n(3)
     !
     !$acc parallel loop collapse(3)
-    do k=0,n3+1
-      do j=0,n2+1
-        do i=0,n1+1
+    do k=1,n3
+      do j=1,n2
+        do i=1,n1
           vof(i,j,k) = min(max(0.0_rp,vof(i,j,k)),1.0_rp) 
         enddo
       enddo
@@ -297,7 +372,7 @@ module mod_vof
     return
   end subroutine clip_vof
   !
-  subroutine cmpt_nor_curv_1o(n1,n2,n3,dli,vof,nor,cur,kappa)
+  subroutine cmpt_nor_curv_1o(n1,n2,n3,nh_v,dli,vof,nor,cur,kappa)
     !
     ! cmpt_nor_curv, 1st order (GPU accelerated)
     !
@@ -305,7 +380,8 @@ module mod_vof
     !
     integer , intent(in )                         :: n1,n2,n3
     real(rp), intent(in ), dimension(3)           :: dli
-    real(rp), intent(in ), dimension(0:,0:,0:   ) :: vof
+    integer , intent(in )                         :: nh_v
+    real(rp), intent(in ), dimension(1-nh_v:n1+nh_v,1-nh_v:n2+nh_v,1-nh_v:n3+nh_v) :: vof
     real(rp), intent(out), dimension(0:,0:,0:,1:) :: nor,cur
     real(rp), intent(out), dimension(0:,0:,0:   ) :: kappa
     !
@@ -394,7 +470,7 @@ module mod_vof
   end subroutine cmpt_nor_curv_1o
   !
 #if defined(_FAST_KERNELS_2) 
-  subroutine cmpt_nor_curv_2o(n1,n2,n3,dli,vof,nor,cur,kappa)
+  subroutine cmpt_nor_curv_2o(n1,n2,n3,nh_v,dli,vof,nor,cur,kappa)
     !
     ! cmpt_nor_curv, 2nd order (GPU accelerated)
     !
@@ -402,7 +478,8 @@ module mod_vof
     !
     integer , intent(in )                         :: n1,n2,n3
     real(rp), intent(in ), dimension(3)           :: dli
-    real(rp), intent(in ), dimension(0:,0:,0:   ) :: vof
+    integer , intent(in )                         :: nh_v
+    real(rp), intent(in ), dimension(1-nh_v:n1+nh_v,1-nh_v:n2+nh_v,1-nh_v:n3+nh_v) :: vof
     real(rp), intent(out), dimension(0:,0:,0:,1:) :: nor,cur
     real(rp), intent(out), dimension(0:,0:,0:   ) :: kappa
     !
@@ -554,17 +631,18 @@ module mod_vof
   !
 #else
   !
-  subroutine cmpt_nor_curv_2o(n1,n2,n3,dli,vof,nor,cur,kappa)
+  subroutine cmpt_nor_curv_2o(n1,n2,n3,nh_v,dli,vof,nor,cur,kappa)
     !
     ! cmpt_nor_curv, 2nd order (GPU accelerated)
     !
     implicit none
     !
-    integer , intent(in )                         :: n1,n2,n3
-    real(rp), intent(in ), dimension(3)           :: dli
-    real(rp), intent(in ), dimension(0:,0:,0:   ) :: vof
-    real(rp), intent(out), dimension(0:,0:,0:,1:) :: nor,cur
-    real(rp), intent(out), dimension(0:,0:,0:   ) :: kappa
+    integer , intent(in )                                     :: n1,n2,n3
+    real(rp), intent(in ), dimension(3)                       :: dli
+    integer , intent(in )                                     :: nh_v
+    real(rp), intent(in ), dimension(1-nh_v:n1+nh_v,1-nh_v:n2+nh_v,1-nh_v:n3+nh_v) :: vof
+    real(rp), intent(out), dimension(0:,0:,0:,1:)             :: nor,cur
+    real(rp), intent(out), dimension(0:,0:,0:   )             :: kappa
     !
     real(rp) :: mx1, mx2, mx3, mx4, mx5, mx6, mx7, mx8
     real(rp) :: my1, my2, my3, my4, my5, my6, my7, my8
@@ -710,10 +788,10 @@ module mod_vof
           nor(i,j,k,2) = 0.125_rp*(my1 + my2 + my3 + my4 + my5 + my6 + my7 + my8)
           nor(i,j,k,3) = 0.125_rp*(mz1 + mz2 + mz3 + mz4 + mz5 + mz6 + mz7 + mz8)
           !
-          norm         = sqrt(nor(i,j,k,1)**2+nor(i,j,k,2)**2+nor(i,j,k,3)**2+small)
-          nor(i,j,k,1) = nor(i,j,k,1)/norm
-          nor(i,j,k,2) = nor(i,j,k,2)/norm
-          nor(i,j,k,3) = nor(i,j,k,3)/norm
+          norm         = sqrt(nor(i,j,k,1)**2+nor(i,j,k,2)**2+nor(i,j,k,3)**2)
+          nor(i,j,k,1) = nor(i,j,k,1)/max(norm, small)
+          nor(i,j,k,2) = nor(i,j,k,2)/max(norm, small)
+          nor(i,j,k,3) = nor(i,j,k,3)/max(norm, small)
           ! 
           ! compute the curvature tensor
           !
@@ -745,14 +823,15 @@ module mod_vof
 #endif
   !
 #if defined(_FAST_KERNELS_3)
-  subroutine cmpt_d_thinc(n1,n2,n3,nor,cur,vof,d_thinc)
+  subroutine cmpt_d_thinc(n1,n2,n3,nh_v,nor,cur,vof,d_thinc)
     !
     implicit none
     !
-    integer , intent(in )                         :: n1,n2,n3
-    real(rp), intent(in ), dimension(0:,0:,0:,1:) :: nor,cur
-    real(rp), intent(in ), dimension(0:,0:,0:)    :: vof
-    real(rp), intent(out), dimension(0:,0:,0:)    :: d_thinc
+    integer , intent(in )                                     :: n1,n2,n3
+    real(rp), intent(in ), dimension(0:,0:,0:,1:)             :: nor,cur
+    integer , intent(in )                                     :: nh_v
+    real(rp), intent(in ), dimension(1-nh_v:n1+nh_v,1-nh_v:n2+nh_v,1-nh_v:n3+nh_v) :: vof
+    real(rp), intent(out), dimension(0:,0:,0:)                :: d_thinc
     !
     real(rp), dimension(3,3) :: av,bv,ev
 !    real(rp), dimension(3) :: nor_v,cv,dv
@@ -774,7 +853,7 @@ module mod_vof
     real(rp) :: b3,b2,b1,b0,a4i
     real(rp) :: c2,c1,c0
     real(rp) :: z1,check,a,b
-    real(rp) :: aa,bb,cc,dd,dd_s
+    real(rp) :: bb,cc,dd,dd_s
     !
     !@cuf attributes(managed) :: vof, d_thinc, nor, cur
     !
@@ -1001,18 +1080,19 @@ module mod_vof
   !
 #else
   !
-  subroutine cmpt_d_thinc(n1,n2,n3,nor,cur,vof,d_thinc)
+  subroutine cmpt_d_thinc(n1,n2,n3,nh_v,nor,cur,vof,d_thinc)
     !
     implicit none
     !
-    integer , intent(in )                         :: n1,n2,n3
-    real(rp), intent(in ), dimension(0:,0:,0:,1:) :: nor,cur
-    real(rp), intent(in ), dimension(0:,0:,0:)    :: vof
-    real(rp), intent(out), dimension(0:,0:,0:)    :: d_thinc
+    integer , intent(in )                                     :: n1,n2,n3
+    integer , intent(in )                                     :: nh_v
+    real(rp), intent(in ), dimension(0:,0:,0:,1:)             :: nor,cur
+    real(rp), intent(in ), dimension(1-nh_v:n1+nh_v,1-nh_v:n2+nh_v,1-nh_v:n3+nh_v) :: vof
+    real(rp), intent(out), dimension(0:,0:,0:)                :: d_thinc
     !
     real(rp), dimension(3,3) :: av,bv,ev
-    real(rp), dimension(3) :: nor_v,cv,dv
-    real(rp), dimension(6) :: cur_v
+    real(rp), dimension(3)   :: nor_v,cv,dv
+    real(rp), dimension(6)   :: cur_v
 #if defined(_TWOD)
     real(rp) :: fm,fp,a2,b2,c2
 #else
@@ -1143,15 +1223,15 @@ module mod_vof
 #endif
   !
 #if defined(_FAST_KERNELS_4)
-  subroutine cmpt_vof_flux(n1, n2, n3,dli,dt,nh_u,vof,nor,cur,d_thinc,dir,vel,flux)
+  subroutine cmpt_vof_flux(n1, n2, n3,dli,dt,nh_u,nh_v,vof,nor,cur,d_thinc,dir,vel,flux)
     !
     implicit none
     !
     integer , intent(in )                                     :: n1,n2,n3
     real(rp), intent(in )                                     :: dli
     real(rp), intent(in )                                     :: dt
-    integer , intent(in )                                     :: nh_u
-    real(rp), intent(in ), dimension(0:,0:,0:   )             :: vof
+    integer , intent(in )                                     :: nh_u,nh_v
+    real(rp), intent(in ), dimension(1-nh_v:n1+nh_v,1-nh_v:n2+nh_v,1-nh_v:n3+nh_v) :: vof
     real(rp), intent(in ), dimension(0:,0:,0:,1:)             :: nor,cur
     real(rp), intent(in ), dimension(0:,0:,0:   )             :: d_thinc
     integer , intent(in )                                     :: dir
@@ -1461,15 +1541,15 @@ module mod_vof
   !
 #else
   !
-  subroutine cmpt_vof_flux(n1, n2, n3,dli,dt,nh_u,vof,nor,cur,d_thinc,dir,vel,flux)
+  subroutine cmpt_vof_flux(n1, n2, n3,dli,dt,nh_u,nh_v,vof,nor,cur,d_thinc,dir,vel,flux)
     !
     implicit none
     !
     integer , intent(in )                                     :: n1,n2,n3
     real(rp), intent(in )                                     :: dli
     real(rp), intent(in )                                     :: dt
-    integer , intent(in )                                     :: nh_u
-    real(rp), intent(in ), dimension(0:,0:,0:   )             :: vof
+    integer , intent(in )                                     :: nh_u,nh_v
+    real(rp), intent(in ), dimension(1-nh_v:n1+nh_v,1-nh_v:n2+nh_v,1-nh_v:n3+nh_v) :: vof
     real(rp), intent(in ), dimension(0:,0:,0:,1:)             :: nor,cur
     real(rp), intent(in ), dimension(0:,0:,0:   )             :: d_thinc
     integer , intent(in )                                     :: dir
@@ -1727,6 +1807,7 @@ module mod_vof
     real(rp) :: c2,c1,c0
     real(rp) :: z1,check,a,b
     real(rp) :: aa,bb,cc,dd,dd_s
+    real(rp) :: arg
     ! 
     ! First change the coefficients in the form of Eq. (B.2)
     !
@@ -1773,7 +1854,8 @@ module mod_vof
     ! Be aware of a small error in the paper, i.e. 
     ! the (+) sign inside the square root should be (-)
     !
-    x = 0.5_rp*(-(aa-cc) + sqrt((aa-cc)**2-4._rp*(bb-dd)))
+    arg = ((aa-cc)**2-4._rp*(bb-dd))
+    x = 0.5_rp*(-(aa-cc) + sqrt(arg))
     !
     return
   end subroutine solve_quar_paper
@@ -1813,9 +1895,13 @@ module mod_vof
   end interface
 #endif
   !
-  subroutine initvof(n,dli,vof)
+  subroutine initvof(n,nh_v,dli,vof)
     !
-    use mod_param     , only: inivof,lx,ly,lz,cbcvof,xc,yc,zc,r,nbub
+    use mod_param     , only: inivof,lx,ly,lz,cbcvof,xc,yc,zc,r,nbub, &
+#if defined(_USE_IBM)
+                              xc_ibm, yc_ibm, zc_ibm, r_ibm, zmax_ibm, zmin_ibm, &
+#endif
+                              theta1,theta2
     use mod_common_mpi, only: myid,ierr,ijk_start
     use mod_sanity    , only: flutas_error
     !
@@ -1824,14 +1910,17 @@ module mod_vof
     implicit none
     !
     integer , intent(in ), dimension(3)        :: n
+    integer , intent(in )                      :: nh_v
     real(rp), intent(in ), dimension(3)        :: dli
-    real(rp), intent(out), dimension(0:,0:,0:) :: vof
+    real(rp), intent(out), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
     !
     integer  :: i,j,k,q,ii,jj,kk, i_b
     real(rp) :: x,y,z,xl,yl,zl,xx,yy,zz
     real(rp) :: sdist,sdistmin
     real(rp) :: zfilm_top,zfilm_bot,sdist1,sdist2,dfilm
     real(rp) :: xfilm_bot,yfilm_bot,csi1,csi2
+    real(rp) :: cyl_top,cyl_bot,cyl_rad,cyl_x,cyl_y
+    real(rp) :: r2,c1,c2,p,h
     integer  :: nbox
     real(rp) :: eps,epsbox
     real(rp), dimension(3) :: dl,dlbox
@@ -2202,6 +2291,107 @@ module mod_vof
       enddo
       !$acc end kernels
       !
+    case('cyl')
+      eps    = dl(3)
+      epsbox = dlbox(3)
+      grid_vol_ratio = product(dlbox(:))/product(dl(:))
+      cyl_x = lx/2.0
+      cyl_y = lx/2.0
+      cyl_top = lz/2.0
+      cyl_bot = 0.0
+      cyl_rad = lx/4.0
+      !$acc kernels
+      do k=1,n3
+       z = (k+ijk_start(3)-0.5_rp)*dl(3)
+        do j=1,n2
+         y = (j+ijk_start(2)-0.5_rp)*dl(2)
+          do i=1,n1
+          x = (i+ijk_start(1)-0.5_rp)*dl(1)
+            !
+            do jj = -1,1
+              do ii = -1,1
+                sdist1 = (z - cyl_top)
+                sdist2 = sqrt( (x+ii*iperiod(1)*lx-cyl_x)**2 + &
+                               (y+jj*iperiod(2)*ly-cyl_y)**2) - cyl_rad
+               if(     all((/sdist1,sdist2/) .lt.-eps) ) then
+                 vof(i,j,k) = 1.0_rp
+               elseif( all((/sdist1,sdist2/) .gt. eps) ) then
+                 vof(i,j,k) = 0.0_rp
+               endif
+              enddo
+            enddo
+            !
+            yl = y-dl(2)/2.0_rp
+            xl = x-dl(1)/2.0_rp
+            do jj=1,nbox
+              yy = yl + (jj-0.5)*dlbox(2)
+              do ii=1,nbox
+                xx = xl + (ii-0.5)*dlbox(1)
+                sdist = sqrt((xx-cyl_x)**2 + (yy-cyl_y)**2) - cyl_rad
+                if(sdist.lt.-epsbox) vof(i,j,k) = vof(i,j,k) + grid_vol_ratio
+              enddo
+            enddo
+            !
+          enddo
+        enddo
+      enddo
+      !$acc end kernels
+#if defined(_USE_IBM)
+    case('corner')
+      eps    = dl(3)
+      epsbox = dlbox(3)
+      grid_vol_ratio = product(dlbox(:))/product(dl(:))
+      cyl_x = xc_ibm
+      cyl_y = yc_ibm
+      r2 = r_ibm + r(1)
+      c1 = (r2/(r2**2 - 1.0_rp))*(tand(theta1) - r2*tand(theta2)**-1)
+      c2 = (r2/(2.0_rp*(r2**2 - 1.0_rp)))*(2.0_rp*log(r2)*(r2*tand(theta2)**-1-tand(theta1))+r2*(r2*tand(theta1)-tand(theta2)**-1))
+      p  = 2.0_rp*(r2*tand(theta1)-tand(theta2)**-1)/(r2**2-1.0_rp)
+      !$acc kernels
+      do k=1,n3
+       z = (k+ijk_start(3)-0.5_rp)*dl(3)
+        do j=1,n2
+         y = (j+ijk_start(2)-0.5_rp)*dl(2)
+          do i=1,n1
+          x = (i+ijk_start(1)-0.5_rp)*dl(1)
+            !
+            ! do jj = -1,1
+              ! do ii = -1,1
+               ! h = -p*((x+ii*iperiod(1)*lx-cyl_x)**2 + (y+jj*iperiod(2)*ly-cyl_y)**2)*0.25_rp  + &
+                   ! c1*log(sqrt((x+ii*iperiod(1)*lx-cyl_x)**2 + (y+jj*iperiod(2)*ly-cyl_y)**2)) + &
+                   ! c2
+               ! if(z.le.h) vof(i,j,k) = 1._rp
+               ! if((z - h).lt.-eps) then
+                 ! vof(i,j,k) = 1._rp
+               ! elseif((z - h).gt.eps) then
+                 ! vof(i,j,k) = 0._rp
+               ! endif
+              ! enddo
+            ! enddo
+               h = -p*((x-cyl_x)**2 + (y-cyl_y)**2)*0.25_rp  + &
+                   c1*log(sqrt((x-cyl_x)**2 + (y-cyl_y)**2)) + &
+                   c2
+               if( z.le.(h+zmin_ibm) ) vof(i,j,k) = 1.0_rp
+            !
+            ! yl = y-dl(2)/2._rp
+            ! xl = x-dl(1)/2._rp
+            ! do jj=1,nbox
+              ! yy = yl + (jj-0.5)*dlbox(2)
+              ! do ii=1,nbox
+                ! xx = xl + (ii-0.5)*dlbox(1)
+                ! h = -p*((xx+ii*iperiod(1)*lx-cyl_x)**2 + (yy+jj*iperiod(2)*ly-cyl_y)**2)*0.25_rp + &
+                    ! c1*log(((xx+ii*iperiod(1)*lx-cyl_x)**2 + (yy+jj*iperiod(2)*ly-cyl_y)**2)) + &
+                    ! c2
+                ! if(z.lt.h) vof(i,j,k) = vof(i,j,k) + grid_vol_ratio
+                ! if((z - h).lt.-epsbox) vof(i,j,k) = vof(i,j,k) + grid_vol_ratio
+              ! enddo
+            ! enddo
+            !
+          enddo
+        enddo
+      enddo
+      !$acc end kernels
+#endif
     case default  
       call flutas_error('Error: invalid name of the initial VoF field. Simulation aborted. Check vof.in')
     end select
