@@ -6,13 +6,17 @@ The overall effort was initiated within the research group of Prof. Luca Brandt 
 
 **References for the original code structure and Poisson solver (CPU and GPU)**
 
- * P. Costa. *A FFT-based finite-difference solver for massively-parallel direct numerical simulations of turbulent flows.* *Computers & Mathematics with Applications* 76: 1853--1862 (2018). [doi:10.1016/j.camwa.2018.07.034](https://doi.org/10.1016/j.camwa.2018.07.034) [[arXiv preprint]](https://arxiv.org/abs/1802.10323)
+ * P. Costa. *A FFT-based finite-difference solver for massively-parallel direct numerical simulations of turbulent flows.* *Computers & Mathematics with Applications* (2018). [doi:10.1016/j.camwa.2018.07.034](https://doi.org/10.1016/j.camwa.2018.07.034) [[arXiv preprint]](https://arxiv.org/abs/1802.10323)
 
  * P. Costa, E. Phillips, L. Brandt & M. Fatica, *GPU acceleration of CaNS for massively-parallel direct numerical simulations of canonical fluid flows* *Computers & Mathematics with Applications* (2020). [doi.org/10.1016/j.camwa.2020.01.002](https://doi.org/10.1016/j.camwa.2020.01.002) [[arXiv preprint]](https://arxiv.org/abs/2001.05234)
 
 **Reference for FluTAS and the acceleration of the multiphase code**
 
-Crialesi-Esposito, M., Scapin, N., Demou, A. D., Rosti, M. E., Costa, P., Spiga, F., & Brandt, L. (2022). *FluTAS: A GPU-accelerated finite difference code for multiphase flows*. [[arXiv preprint]](https://arxiv.org/abs/2204.08834)
+* Crialesi-Esposito, M., Scapin, N., Demou, A. D., Rosti, M. E., Costa, P., Spiga, F., & Brandt, L. *FluTAS: A GPU-accelerated finite difference code for multiphase flows*. *Computer Physics Communications* (2023). [doi:10.1016/j.cpc.2022.108602](https://doi.org/10.1016/j.cpc.2022.108602) [[arXiv preprint]](https://arxiv.org/abs/2204.08834)
+
+**Reference for the immersed boundary method**
+
+* Shahmardi, A., Rosti, M. E., Tammisola, O., & Brandt, L. *A fully Eulerian hybrid immersed boundary-phase field model for contact line dynamics on complex geometries*. *Journal of Computational Physics* (2021) [doi:10.1016/j.jcp.2021.110468](https://doi.org/10.1016/j.jcp.2021.110468) [[arXiv preprint]](https://arxiv.org/abs/2104.00350)
 
 We recommend new users to have a look at this document and to carefully read the section **Compilation and usage**.
 
