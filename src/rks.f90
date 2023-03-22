@@ -98,7 +98,6 @@ module mod_rks
     !$OMP END PARALLEL DO
 #endif
     !
-    return
   end subroutine rk_sca
   !
 end module mod_rks

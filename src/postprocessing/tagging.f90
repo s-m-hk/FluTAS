@@ -18,12 +18,11 @@ module mod_tagging
   !
   contains
   !
-  subroutine droplet_tagging(n,dims,datadir_ta,dl,nh_d,nh_v,nh_u,halo_v,dzc,dzf,vof,u,v,w,istep,time)
+  subroutine droplet_tagging(ng,dims,m,datadir_ta,dl,nh_d,nh_v,nh_u,halo_v,dzc,dzf,vof,u,v,w,istep,time)
     !
     implicit none
     !
-    integer         , intent(in), dimension(3)                       :: n
-    integer         , intent(in), dimension(3)                       :: dims
+    integer         , intent(in), dimension(3)                       :: n,ng,dims
     character(len=*), intent(in)                                     :: datadir_ta
     real(rp)        , intent(in), dimension(3)                       :: dl
     integer         , intent(in)                                     :: nh_d,nh_v,nh_u
@@ -228,7 +227,6 @@ module mod_tagging
     !
     deallocate(xd,yd,zd,ud,vd,wd,vold,procShare,idShare)
     !
-    return
   end subroutine droplet_tagging
   !
   recursive subroutine recursive_tagging(n,i,j,k,id,vof_f,vofTag)
@@ -260,7 +258,6 @@ module mod_tagging
       enddo
     enddo
     !
-    return
   end subroutine recursive_tagging
   !
   subroutine write_output_r8(istep,datadir_ta,varname,var,nd)
@@ -292,7 +289,6 @@ module mod_tagging
     call MPI_FILE_WRITE(fh,var,nd,MPI_DOUBLE_PRECISION,MPI_STATUS_IGNORE,ierr)
     call MPI_FILE_CLOSE(fh,ierr)
     !
-    return
   end subroutine write_output_r8
   !
   subroutine write_output_i6(istep,datadir_ta,varname,var,nd)
@@ -324,7 +320,6 @@ module mod_tagging
     call MPI_FILE_WRITE_all(fh,var,nelem*nd,MPI_INTEGER,MPI_STATUS_IGNORE,ierr)
     call MPI_FILE_CLOSE(fh,ierr)
     !
-    return
   end subroutine write_output_i6
   !
   subroutine write_output_i1(istep,datadir_ta,varname,var,nd)
@@ -355,7 +350,6 @@ module mod_tagging
     call MPI_FILE_WRITE(fh,var,nd,MPI_INTEGER,MPI_STATUS_IGNORE,ierr)
     call MPI_FILE_CLOSE(fh,ierr)
     !
-    return
   end subroutine write_output_i1
   !
 end module

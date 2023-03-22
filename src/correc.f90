@@ -77,7 +77,6 @@ module mod_correc
     !$OMP END PARALLEL DO
 #endif
     !
-    return
   end subroutine correc
   !
 end module mod_correc

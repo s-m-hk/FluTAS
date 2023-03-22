@@ -8,6 +8,7 @@ module mod_chkdt
   use mod_common_mpi, only: ierr
   use mod_types
   !@cuf use cudafor
+  !@cuf use mod_common_mpi, only: mydev
   !
   implicit none
   !
@@ -47,6 +48,7 @@ module mod_chkdt
 #if defined(_HEAT_TRANSFER)
     real(rp) :: dtth
 #endif
+    !@cuf integer :: istat
     !@cuf attributes(managed) :: u, v, w, dzci, dzfi
     integer :: i,j,k
     !
@@ -89,6 +91,7 @@ module mod_chkdt
 #else
     !$OMP END PARALLEL DO
 #endif
+    !@cuf istat=cudaDeviceSynchronize()
     call mpi_allreduce(MPI_IN_PLACE,dti,1,MPI_REAL_RP,MPI_MAX,MPI_COMM_WORLD,ierr)
     if(dti.eq.0._rp) dti = 1._rp
     dtic   = dti
@@ -111,7 +114,6 @@ module mod_chkdt
     dtmax  = min(dtmax,dtth)
 #endif
     !
-    return
   end subroutine chkdt_tw
 #else
   subroutine chkdt_sp(nx,ny,nz,dxi,dyi,dzi,nh_d,nh_u,dzci,dzfi,u,v,w,dtmax)
@@ -138,6 +140,7 @@ module mod_chkdt
 #if defined(_HEAT_TRANSFER)
     real(rp) :: dtth
 #endif
+    !@cuf integer :: istat
     !@cuf attributes(managed) :: u, v, w, dzci, dzfi
     integer :: i,j,k
     !
@@ -180,6 +183,7 @@ module mod_chkdt
 #else
     !$OMP END PARALLEL DO
 #endif
+    !@cuf istat=cudaDeviceSynchronize()
     call mpi_allreduce(MPI_IN_PLACE,dti,1,MPI_REAL_RP,MPI_MAX,MPI_COMM_WORLD,ierr)
     if(dti.eq.0._rp) dti = 1._rp
     dtic   = dti
@@ -195,7 +199,6 @@ module mod_chkdt
     dtmax  = min(dtmax,dtth)
 #endif
     !
-    return
   end subroutine chkdt_sp
 #endif
   !

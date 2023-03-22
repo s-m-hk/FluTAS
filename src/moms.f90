@@ -96,7 +96,6 @@ module mod_moms
 #else
     !$OMP END PARALLEL DO
 #endif
-    return
     !
   end subroutine momtad_tw
 #else
@@ -167,7 +166,6 @@ module mod_moms
 #else
     !$OMP END PARALLEL DO
 #endif
-    return
     !
   end subroutine momtad_sp
 #endif

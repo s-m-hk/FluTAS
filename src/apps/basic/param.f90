@@ -48,15 +48,25 @@ module mod_param
   !
   !  --> from vof.in (always defined in this app)
   !
-  real(rp) :: rho1,rho2,mu1,mu2
+  real(rp) :: rho1,rho2,mu1,mu2,theta1,theta2
   character(len=3) :: inivof
-  real(rp),  allocatable, dimension(:) :: xc, yc, zc, r
+  real(rp),  allocatable, dimension(:) :: xc_bub, yc_bub, zc_bub, r_bub
   character(len=1), dimension(0:1,3) :: cbcvof
   real(rp)        , dimension(0:1,3) ::  bcvof
+  real(rp) :: xc, yc, zc, r
   real(rp) :: sigma
   logical  :: late_init
   integer  :: nbub=0, i_b,i_late_init
+#if defined(_USE_IBM)
   !
+  character(len=4) :: surface_type
+  real(rp) :: xc_ibm, yc_ibm, zc_ibm, r_ibm
+  real(rp) :: zmax_ibm, zmin_ibm
+  real(rp) :: solid_height_ratio
+  real(rp) :: Rotation_angle
+  real(rp) :: d1,d2
+  !
+#endif
 #if defined(_TURB_FORCING)
   !
   !  --> from forcing.in (if defined)
@@ -92,8 +102,8 @@ module mod_param
   !
   ! 3. parameters, e.g., pi, RK coefficients, small, universal constants etc.
   !
-  real(rp), parameter :: pi = acos(-1._rp)
-  real(rp), parameter :: small = epsilon(pi)*10**(precision(pi)/2._rp)
+  real(rp), parameter :: pi = 4._rp*atan(1._rp)
+  real(rp), parameter :: small = epsilon(pi)*10**(precision(pi)/4._rp)
   logical , parameter, dimension(2,3) :: no_outflow = & 
       reshape((/.false.,.false.,   & ! no outflow in x lower,upper bound
                 .false.,.false.,   & ! no outflow in y lower,upper bound
@@ -164,16 +174,12 @@ module mod_param
       read(iunit,*) rho1, rho2, mu1, mu2
       read(iunit,*) inivof
       read(iunit,*) nbub
-      allocate(xc(nbub), yc(nbub), zc(nbub), r(nbub))
-      if(nbub.eq.1) then
-        read(iunit,*) xc, yc, zc, r
-      else
-        read(iunit,*) xc(1), yc(1), zc(1), r(1)
-      endif
+      read(iunit,*) xc, yc, zc, r
       read(iunit,*) cbcvof(0,1 ),cbcvof(1,1 ),cbcvof(0,2 ),cbcvof(1,2 ),cbcvof(0,3 ),cbcvof(1,3 )
       read(iunit,*) bcvof(0,1  ),bcvof(1,1  ),bcvof(0,2  ),bcvof(1,2  ),bcvof(0,3  ),bcvof(1,3  )
       read(iunit,*) sigma
       read(iunit,*) late_init, i_late_init
+      read(iunit,*) theta1,theta2
     else
       if(myid.eq.0) print*, 'Error reading the vof.in input file' 
       if(myid.eq.0) print*, 'Input file missing or incomplete' 
@@ -184,11 +190,12 @@ module mod_param
     rho0 = min(rho1,rho2)
     close(iunit)
     !
-    if(nbub.gt.1) then
+    if(nbub.gt.0) then
+      allocate(xc_bub(nbub), yc_bub(nbub), zc_bub(nbub), r_bub(nbub))
       open(newunit=iunit,file='bub.in',status='old',action='read',iostat=ierr)
       if( ierr.eq.0 ) then    
         do i_b=1,nbub
-          read(iunit,*) xc(i_b), yc(i_b), zc(i_b), r(i_b)
+          read(iunit,*) xc_bub(i_b), yc_bub(i_b), zc_bub(i_b), r_bub(i_b)
         enddo
       else
         if(myid.eq.0) print*, 'Error reading the bub.in input file' 
@@ -218,6 +225,26 @@ module mod_param
     else
       do_tagging = .false.
       iout0d_ta  = 1
+    endif
+    close(iunit)
+#endif
+    !  
+    ! load ibm forcing input files (if defined)
+    !
+#if defined(_USE_IBM)
+    open(newunit=iunit,file='ibm.in',status='old',action='read',iostat=ierr)
+      if( ierr.eq.0 ) then
+		read(iunit,*) surface_type
+        read(iunit,*) xc_ibm, yc_ibm, zc_ibm, r_ibm
+        read(iunit,*) zmax_ibm, zmin_ibm
+        read(iunit,*) solid_height_ratio
+        read(iunit,*) Rotation_angle
+        read(iunit,*) d1,d2
+      else
+        if(myid.eq.0) print*, 'Error reading the IBM input file'
+        if(myid.eq.0) print*, 'Aborting...'
+        call MPI_FINALIZE(ierr)
+        call exit
     endif
     close(iunit)
 #endif
@@ -276,7 +303,6 @@ module mod_param
       cfl_d   = 1.65_rp/12._rp
     endif
     !
-    return
   end subroutine read_input
   !
 end module mod_param

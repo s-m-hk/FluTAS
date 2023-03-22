@@ -16,7 +16,8 @@ program flutas
   !
   ! module declaration 
   !
-  use iso_c_binding , only: C_PTR
+  use, intrinsic :: iso_c_binding  , only: C_PTR
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_nan
   use mpi
   use decomp_2d
   use mod_bound     , only: boundp,updt_rhs_b,bounduvw
@@ -57,7 +58,7 @@ program flutas
                             bulk_ftype,rkcoeff, &
                             time_scheme,space_scheme_mom,n_stage, &
 #if defined(_USE_IBM)
-                            zmax_ibm, &
+                            zmax_ibm,surface_type, &
 #endif
                             read_input
   !
@@ -78,20 +79,20 @@ program flutas
   use mod_solver_cpu, only: solver_cpu
 #endif
   use mod_types
-  use mod_vof       , only: initvof,advvof,update_vof,update_property,update_property_harmonic
+  use mod_vof       , only: initvof,advvof,update_vof,update_property,update_property_harmonic,update_visc_harmonic
   use profiler
 #if defined(_DO_POSTPROC)
   use mod_tagging   , only: droplet_tagging
 #endif
 #if defined(_USE_IBM)
   use mod_initIBM
-  use mod_IBM        , only: Penalization_face,Wetting_radius
+  use mod_IBM        , only: Penalization_face, Wetting_radius
 #if defined(_USE_CONTACTANGLE)
   use mod_setangle
 #endif
 #endif
-  !@cuf use mod_common_mpi, only: mydev
   !@cuf use cudafor
+  !@cuf use mod_common_mpi, only: mydev
   !
   !$ use omp_lib
   !
@@ -108,7 +109,7 @@ program flutas
   real(rp), dimension(:), allocatable :: dzc  ,dzf  ,zc  ,zf  ,dzci  ,dzfi
   real(rp), dimension(:), allocatable :: dzc_g,dzf_g,zc_g,zf_g,dzci_g,dzfi_g
   !
-  real(rp), dimension(:,:,:)  , allocatable :: psi,kappa   
+  real(rp), dimension(:,:,:)  , allocatable :: psi,psit,kappa   
   real(rp), dimension(:,:,:,:), allocatable :: cur_t                 
   real(rp), dimension(:,:,:,:), allocatable :: nor                   
   real(rp), dimension(:,:,:)  , allocatable :: d_thinc
@@ -119,10 +120,10 @@ program flutas
   real(rp) :: normfftp
   !
 #if defined(_USE_IBM)
-  real(rp),dimension(:,:,:),allocatable :: cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag
-  integer,dimension(:,:,:),allocatable:: Level_set,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
-  real(rp),dimension(:,:,:),allocatable:: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
-  real(rp),dimension(:,:,:,:),allocatable:: WP1,WP2
+  real(rp),dimension(:,:,:),allocatable   :: Level_set,cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag
+  real(rp),dimension(:,:,:),allocatable   :: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
+  integer, dimension(:,:,:),allocatable   :: i_mirror,j_mirror,k_mirror,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
+  real(rp),dimension(:,:,:,:),allocatable :: WP1,WP2
 #endif
   !
   real(rp), allocatable, dimension(:,:,:) :: rhsbp_x, rhsbp_y, rhsbp_z
@@ -147,26 +148,26 @@ program flutas
   !
   real(rp) :: meanvel,meanvelu,meanvelv,meanvelw
   real(rp), dimension(3) :: dpdl_c
-  real(rp), dimension(10) :: var
+  real(rp), dimension(20) :: var
   ! 
   character(len=9) :: fldnum
   real(rp) :: f1d,f2d,f3d
   real(rp) :: twi,tw
+  real(rp) :: rho0i
   integer :: kk
   logical :: is_done,kill
-  real(rp) :: rho0i
   !
   !@cuf integer :: istat
   !@cuf integer(kind=cuda_count_kind) :: freeMem, totMem
-  !@cuf attributes(managed) :: pold, kappa, mu, rho, psi, d_thinc, cur_t, nor
+  !@cuf attributes(managed) :: pold, kappa, mu, rho, psi, psit, d_thinc, cur_t, nor
   !@cuf attributes(managed) :: u, v, w, p 
-  !@cuf attributes(managed) :: dzc  , dzf  , zc  , zf  , dzci, dzfi
-  !@cuf attributes(managed) :: zc_g, zf_g
+  !@cuf attributes(managed) :: dzc, dzf, zc, zf, dzci, dzfi
+  !@cuf attributes(managed) :: dzc_g, dzf_g, zc_g, zf_g, dzci_g, dzfi_g
   !@cuf attributes(managed) :: lambdaxyp, ap, bp, cp, rhsbp_x, rhsbp_y, rhsbp_z
   !@cuf attributes(managed) :: dudtrko, dvdtrko, dwdtrko
 #if defined(_USE_IBM)
   !@cuf attributes(managed) :: cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag
-  !@cuf attributes(managed) :: Level_set,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
+  !@cuf attributes(managed) :: Level_set,i_mirror,j_mirror,k_mirror,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
   !@cuf attributes(managed) :: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
   !@cuf attributes(managed) :: WP1,WP2
 #endif
@@ -176,8 +177,8 @@ program flutas
   real(rp) :: vof_min,vof_max,vol_p1
   real(rp) :: aux
   integer  :: ii,jj
-  integer :: n1, n2, n3
-  integer :: ng1, ng2, ng3
+  integer  :: n1, n2, n3
+  integer  :: ng1, ng2, ng3
   !
   call MPI_INIT(ierr)
   call MPI_COMM_RANK(MPI_COMM_WORLD,myid,ierr)
@@ -233,7 +234,7 @@ program flutas
   nh_b = 1
 #endif
   !
-  nh_d = max(nh_u,nh_p,nh_b,nh_v)  ! take the maximum of the previous ones
+  nh_d = max(nh_u,nh_p,nh_v)  ! take the maximum of the previous ones
   !
   ! allocate memory
   !
@@ -275,6 +276,9 @@ program flutas
               cell_w_tag(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
             cell_phi_tag(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
                Level_set(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
+                   i_mirror(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
+                   j_mirror(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
+                   k_mirror(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
                    i_IP1(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
                    j_IP1(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
                    k_IP1(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), &
@@ -292,54 +296,62 @@ program flutas
   !
   ! prefetching of the variables (TODO: remember to add the one of x-pencil!)
   !
-  !@cuf istat = cudaMemAdvise(u, size(u), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(v, size(v), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(w, size(w), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(p, size(p), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(dudtrko, size(dudtrko), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(dvdtrko, size(dvdtrko), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(dwdtrko, size(dwdtrko), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(rhsbp_x, size(rhsbp_x), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(rhsbp_y, size(rhsbp_y), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(rhsbp_z, size(rhsbp_z), cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(u, size(u),                 cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(v, size(v),                 cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(w, size(w),                 cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(p, size(p),                 cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(dudtrko, size(dudtrko),     cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(dvdtrko, size(dvdtrko),     cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(dwdtrko, size(dwdtrko),     cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(rhsbp_x, size(rhsbp_x),     cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(rhsbp_y, size(rhsbp_y),     cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(rhsbp_z, size(rhsbp_z),     cudaMemAdviseSetPreferredLocation, mydev)
   !@cuf istat = cudaMemAdvise(lambdaxyp, size(lambdaxyp), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(dzc, size(dzc), cudaMemAdviseSetReadMostly, 0)
-  !@cuf istat = cudaMemAdvise(dzf, size(dzf), cudaMemAdviseSetReadMostly, 0)
-  !@cuf istat = cudaMemAdvise(dzci, size(dzci), cudaMemAdviseSetReadMostly, 0)
-  !@cuf istat = cudaMemAdvise(dzfi, size(dzfi), cudaMemAdviseSetReadMostly, 0)
-  !
-  !@cuf istat = cudaMemAdvise(zc_g , size(zc_g) , cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(zf_g , size(zf_g) , cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(zc_g, size(zc_g),           cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(zf_g, size(zf_g),           cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(dzc_g, size(dzc_g),         cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(dzf_g, size(dzf_g),         cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(dzci_g, size(dzci_g),       cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(dzfi_g, size(dzfi_g),       cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(zc, size(zc),               cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(zf, size(zf),               cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(dzc, size(dzc),             cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(dzf, size(dzf),             cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(dzci, size(dzci),           cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(dzfi, size(dzfi),           cudaMemAdviseSetReadMostly, 0)
   !
 #if defined(_USE_VOF)
-  !@cuf istat = cudaMemAdvise(mu, size(mu), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(pold, size(pold), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(rho, size(rho), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(kappa, size(kappa), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(psi, size(psi), cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(mu, size(mu),           cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(pold, size(pold),       cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(rho, size(rho),         cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(kappa, size(kappa),     cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(psi, size(psi),         cudaMemAdviseSetPreferredLocation, mydev)
   !@cuf istat = cudaMemAdvise(d_thinc, size(d_thinc), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(nor, size(nor), cudaMemAdviseSetPreferredLocation, mydev)
-  !@cuf istat = cudaMemAdvise(cur_t, size(cur_t), cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(nor, size(nor),         cudaMemAdviseSetPreferredLocation, mydev)
+  !@cuf istat = cudaMemAdvise(cur_t, size(cur_t),     cudaMemAdviseSetPreferredLocation, mydev)
 #endif
 #if defined(_USE_IBM)
-  !@cuf istat = cudaMemAdvise(cell_u_tag, size(cell_u_tag), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(cell_v_tag, size(cell_v_tag), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(cell_w_tag, size(cell_w_tag), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(cell_phi_tag, size(cell_phi_tag), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(Level_set, size(Level_set), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(nx_surf, size(nx_surf), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(ny_surf, size(ny_surf), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(nz_surf, size(nz_surf), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(nabs_surf, size(nabs_surf), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(deltan, size(deltan), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(i_IP1, size(i_IP1), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(i_IP2, size(i_IP2), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(j_IP1, size(j_IP1), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(j_IP2, size(j_IP2), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(k_IP1, size(k_IP1), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(k_IP2, size(k_IP2), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(WP1, size(WP1), cudaMemAdviseSetReadMostly, mydev)
-  !@cuf istat = cudaMemAdvise(WP2, size(WP2), cudaMemAdviseSetReadMostly, mydev)
+  !@cuf istat = cudaMemAdvise(cell_u_tag, size(cell_u_tag),            cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(cell_v_tag, size(cell_v_tag),            cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(cell_w_tag, size(cell_w_tag),            cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(cell_phi_tag, size(cell_phi_tag),        cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(Level_set, size(Level_set),              cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(nx_surf, size(nx_surf),                  cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(ny_surf, size(ny_surf),                  cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(nz_surf, size(nz_surf),                  cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(nabs_surf, size(nabs_surf),              cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(deltan, size(deltan),                    cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(i_mirror, size(i_mirror),                cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(j_mirror, size(j_mirror),                cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(k_mirror, size(k_mirror),                cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(i_IP1, size(i_IP1),                      cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(j_IP1, size(j_IP1),                      cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(k_IP1, size(k_IP1),                      cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(i_IP2, size(i_IP2),                      cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(j_IP2, size(j_IP2),                      cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(k_IP2, size(k_IP2),                      cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(WP1, size(WP1),                          cudaMemAdviseSetReadMostly, 0)
+  !@cuf istat = cudaMemAdvise(WP2, size(WP2),                          cudaMemAdviseSetReadMostly, 0)
 #endif
   !
   if(myid.eq.0) print*, '************************************************'
@@ -371,6 +383,12 @@ program flutas
 #endif
   !
 #endif
+  !@cuf istat = cudaMemPrefetchAsync(zc_g,  size(zc_g), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(zf_g,  size(zf_g), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzc_g, size(dzc_g), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzf_g, size(dzf_g), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzci_g, size(dzci_g), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzfi_g, size(dzfi_g), cudaCpuDeviceId, 0)
   !
   ! initialize the grid (using global variables along z)
   !
@@ -382,7 +400,7 @@ program flutas
     close(99)
     open(99,file=trim(datadir)//'grid.out')
     do kk=1-nh_d,ng(3)+nh_d
-      write(99,'(5E15.7)') 1._rp*kk,zf_g(kk),zc_g(kk),dzf_g(kk),dzc_g(kk)
+      write(99,'(5E15.7)') real(kk,rp),zf_g(kk),zc_g(kk),dzf_g(kk),dzc_g(kk)
     enddo
     close(99)
     open(99,file=trim(datadir)//'geometry.out')
@@ -390,12 +408,17 @@ program flutas
       write(99,*) l(1),l(2),l(3)
     close(99)
   endif
-  !@cuf istat = cudaMemPrefetchAsync(zc_g , size( zc_g), mydev, 0)
-  !@cuf istat = cudaMemPrefetchAsync(zf_g , size( zf_g), mydev, 0)
+  !
+  !@cuf istat = cudaMemPrefetchAsync(zc_g , size(zc_g), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(zf_g , size(zf_g), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzci_g, size(dzci_g), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzfi_g, size(dzfi_g), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzc_g, size(dzc_g), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzf_g, size(dzf_g), mydev, 0)
   !
   do k=1-nh_d,ng3+nh_d
-    dzfi_g(k) = 1._rp/dzf_g(k)
-    dzci_g(k) = 1._rp/dzc_g(k)
+    dzfi_g(k) = 1.0_rp/dzf_g(k)
+    dzci_g(k) = 1.0_rp/dzc_g(k)
   enddo
   !
   ! compute the spacing along z in local coordinates
@@ -406,9 +429,14 @@ program flutas
     zf(k)   = zf_g(kk) 
     dzf(k)  = dzf_g(kk)
     dzc(k)  = dzc_g(kk)
-    dzfi(k) = 1._rp/dzf(k)
-    dzci(k) = 1._rp/dzc(k)
+    dzfi(k) = 1.0_rp/dzf(k)
+    dzci(k) = 1.0_rp/dzc(k)
   enddo
+  !
+  !@cuf istat = cudaMemPrefetchAsync(zc, size(zc), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(zf, size(zf), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzc, size(dzc), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(dzf, size(dzf), mydev, 0)
   !@cuf istat = cudaMemPrefetchAsync(dzci, size(dzci), mydev, 0)
   !@cuf istat = cudaMemPrefetchAsync(dzfi, size(dzfi), mydev, 0)
   !
@@ -426,63 +454,39 @@ program flutas
       !
       ! Initialize VoF 
       !
-      call initvof(n,nh_v,dli,psi)
-      !@cuf istat = cudaMemPrefetchAsync(p, size(psi), mydev, 0)
+      !@cuf istat = cudaMemPrefetchAsync(psi, size(psi), mydev, 0)
+      call initvof(n,nh_v,nh_d,dl,dli,zc,zf,dzc,dzf,psi)
       call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,psi)
       !
     else
-      !$acc kernels
-      psi(:,:,:) = 0._rp 
-      !$acc end kernels
+      !@cuf istat = cudaMemPrefetchAsync(psi, size(psi), mydev, 0)
+      psi(:,:,:) = 0.0_rp
       call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,psi)
     endif
+    !
+    !@cuf istat = cudaMemPrefetchAsync(u,       size(u),       mydev, 0)
+    !@cuf istat = cudaMemPrefetchAsync(v,       size(v),       mydev, 0)
+    !@cuf istat = cudaMemPrefetchAsync(w,       size(w),       mydev, 0)
+    !@cuf istat = cudaMemPrefetchAsync(p,       size(p),       mydev, 0)
     !
     call initflow(inivel,n(1),n(2),n(3),dims,nh_d,nh_u,nh_p,rho2,mu2,zc/lz,dzc/lz,dzf/lz,u,v,w,p)
     !
     ! set to zeros the rhs of momentum equation 
     ! (only for the first time-step, not for the restarting)
-    ! 
-    !$acc kernels
+    !
+    !@cuf istat = cudaMemPrefetchAsync(dudtrko, size(dudtrko), cudaCpuDeviceId, 0)
+    !@cuf istat = cudaMemPrefetchAsync(dvdtrko, size(dvdtrko), cudaCpuDeviceId, 0)
+    !@cuf istat = cudaMemPrefetchAsync(dwdtrko, size(dwdtrko), cudaCpuDeviceId, 0)
+    !
     do k=1,n3
       do j=1,n2
         do i=1,n1
-          dudtrko(i,j,k) = 0._rp
-          dvdtrko(i,j,k) = 0._rp
-          dwdtrko(i,j,k) = 0._rp
+          dudtrko(i,j,k) = 0.0_rp
+          dvdtrko(i,j,k) = 0.0_rp
+          dwdtrko(i,j,k) = 0.0_rp
         enddo
       enddo
     enddo
-    !$acc end kernels
-#if defined(_USE_IBM)
-    call initIBM(cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag,Level_set, &
-                 nx_surf,ny_surf,nz_surf,nabs_surf, &
-                 i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,deltan, &
-                 nh_d,nh_b,halo_b,&
-                 zc,zf,dzc,dzf,dl,dli)
-    !$acc kernels 
-    do k=1,n3
-      do j=1,n2
-        do i=1,n1
-          psi(i,j,k) = (1.0_rp - cell_phi_tag(i,j,k))*psi(i,j,k)
-        end do
-      end do
-    end do
-    !$acc end kernels
-    !$acc kernels 
-    do k=1,n3
-      do j=1,n2
-        do i=1,n1
-        if(zc(k).ge.(zmax_ibm-2.0_rp*dz)) psi(i,j,k) = 0.0_rp
-        end do
-      end do
-    end do
-    !$acc end kernels
-    !@cuf istat = cudaMemPrefetchAsync(p, size(psi), mydev, 0)
-    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,psi)
-#if defined(_USE_CONTACTANGLE)
-    call setangle(n,dl,psi,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,0,u,v,w,zc,dzc)
-#endif
-#endif
     !
     if(myid.eq.0) print*, '*** Initial condition successfully set ***'
     !
@@ -498,17 +502,36 @@ program flutas
     call load(action_load,trim(restart_dir)//'fldp.bin',n,      p(1:n(1),1:n(2),1:n(3)))
     call load(action_load,trim(restart_dir)//'fldpsi.bin',n,    psi(1:n(1),1:n(2),1:n(3)))
     call load_scalar(action_load,trim(restart_dir)//'scalar.out',time,istep,dto)
-#if defined(_USE_IBM)
-    call initIBM(cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag,Level_set, &
-                 nx_surf,ny_surf,nz_surf,nabs_surf, &
-                 i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,deltan, &
-                 nh_d,nh_b,halo_b,&
-                 zc,zf,dzc,dzf,dl,dli)
-#endif
     !
-    if(myid.eq.0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
+    if(myid.eq.0) print*, '*** Loaded checkpoint at time = ', time, 'time step = ', istep, ' ***'
     !
   endif
+#if defined(_USE_IBM)
+  call initIBM(dims,n,ng,cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag,Level_set, &
+               nx_surf,ny_surf,nz_surf,nabs_surf, &
+               i_mirror,j_mirror,k_mirror, &
+               i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+               WP1,WP2,deltan, &
+               nh_d,nh_b,halo_b, &
+               zc,zf,dzc,dzf,dl,dli)
+
+  !$acc parallel loop collapse(3)
+  do k=1,n3
+    do j=1,n2
+      do i=1,n1
+        psi(i,j,k) = cell_phi_tag(i,j,k)*psi(i,j,k)
+      end do
+    end do
+  end do
+  !$acc end parallel loop 
+  !
+  if(surface_type.eq.'WCyl') then
+   do k=1,n3
+    if(zc(k).ge.(zmax_ibm-2.0_rp*dz)) psi(:,:,k) = 0.0_rp
+   end do
+  endif
+  !
+#endif
   !
   !@cuf istat = cudaMemPrefetchAsync(dudtrko, size(dudtrko), mydev, 0)
   !@cuf istat = cudaMemPrefetchAsync(dvdtrko, size(dvdtrko), mydev, 0)
@@ -523,6 +546,7 @@ program flutas
   ! for the first time-step and the restarting we use a 0th order extrapolation 
   ! in time-splitting of the pressure equation
   !
+  !@cuf istat = cudaMemPrefetchAsync(pold,       size(pold),       mydev, 0)
   !$acc kernels 
   do k=1,n3
     do j=1,n2
@@ -537,11 +561,13 @@ program flutas
   !
   ! update the quantities derived from VoF using the latest available VoF field
   !
+  !@cuf istat = cudaMemPrefetchAsync(rho, size(rho), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(mu, size(mu), mydev, 0)
+  !
   call update_vof(n,dli,nh_d,dzc,dzf,nh_p,nh_v,halo_p,psi,nor,cur_t,kappa,d_thinc)
   call update_property(n,nh_v,(/rho1,rho2/),psi,rho)
   call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,rho)
-  ! call update_property(n,nh_v,(/mu1 ,mu2 /),psi,mu)
-  call update_property_harmonic(n,nh_v,(/mu1,mu2/),psi,mu)
+  call update_visc_harmonic(n,nh_v,(/rho1,rho2/),(/mu1,mu2/),rho,psi,mu)
   call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,mu)
   !
   ! post-process and write initial condition
@@ -557,15 +583,37 @@ program flutas
   !@cuf istat = cudaMemPrefetchAsync(psi, size(psi), cudaCpuDeviceId, 0)
   !
   write(fldnum,'(i9.9)') istep
-  include 'out1d.h90'
+  ! include 'out1d.h90'
   include 'out2d.h90'
   include 'out3d.h90'
 #if defined(_USE_IBM)
   !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nabs_surf, size(nabs_surf), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nx_surf, size(nx_surf), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(ny_surf, size(ny_surf), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nz_surf, size(nz_surf), cudaCpuDeviceId, 0)
+
   call write_visu_3d(datadir,'sol_fld_'//fldnum//'.bin','log_visu_3d.out','sol', &
                      (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
-                     cell_phi_tag(1:n(1),1:n(2),1:n(3)))
+                     (1.0_rp - cell_phi_tag(1:n(1),1:n(2),1:n(3))))
+  call write_visu_3d(datadir,'nab_fld_'//fldnum//'.bin','log_visu_3d.out','nab', &
+                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
+                     nabs_surf(1:n(1),1:n(2),1:n(3)))
+  call write_visu_3d(datadir,'n_x_fld_'//fldnum//'.bin','log_visu_3d.out','nx', &
+                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
+                     nx_surf(1:n(1),1:n(2),1:n(3)))
+  call write_visu_3d(datadir,'n_y_fld_'//fldnum//'.bin','log_visu_3d.out','ny', &
+                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
+                     ny_surf(1:n(1),1:n(2),1:n(3)))
+  call write_visu_3d(datadir,'n_z_fld_'//fldnum//'.bin','log_visu_3d.out','nz', &
+                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
+                     nz_surf(1:n(1),1:n(2),1:n(3)))
+
   !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nabs_surf,    size(cell_phi_tag), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nx_surf,      size(nx_surf), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(ny_surf,      size(ny_surf), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nz_surf,      size(nz_surf), mydev, 0)
 #endif
   !
   ! Prefetching post IO
@@ -610,8 +658,8 @@ program flutas
   vol_p1  = sum(psi(1:n1,1:n2,1:n3))*dl(1)*dl(2)*dl(3)
   call mpi_allreduce(MPI_IN_PLACE,vol_p1 ,1,MPI_REAL_RP,MPI_SUM,MPI_COMM_WORLD,ierr)
   !
-  var(:) = 0._rp
-  var(1) = 1._rp*istep
+  var(:) = 0.0_rp
+  var(1) = real(istep,rp)
   var(2) = dt
   var(3) = time
   var(4) = vof_min
@@ -622,6 +670,10 @@ program flutas
   ! initialize Poisson solver
   ! and deallocate global arrays (not needed anymore) 
   !
+  !@cuf istat = cudaMemPrefetchAsync(rhsbp_x, size(rhsbp_x), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(rhsbp_y, size(rhsbp_y), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(rhsbp_z, size(rhsbp_z), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(lambdaxyp, size(lambdaxyp), cudaCpuDeviceId, 0)
   call initsolver(n,dims,dims_xyz(:,3),dli,nh_d,dzci_g,dzfi_g,cbcpre,bcpre(:,:),(/'c','c','c'/),lambdaxyp, & 
                   ap,bp,cp,arrplanp,normfftp,rhsbp_x,rhsbp_y,rhsbp_z)
   !@cuf istat = cudaMemPrefetchAsync(rhsbp_x, size(rhsbp_x), mydev, 0)
@@ -648,31 +700,27 @@ program flutas
     !
     call profiler_start("STEP", tag = .true., tag_color = COLOR_WHITE)
     !
-    time  = time + dt
-    !
-    if(myid.eq.0) print*, 'Timestep #', istep, 'Time = ', time
-    !
     if(late_init.and.(istep.eq.i_late_init)) then
       !
-      call initvof(n,nh_v,dli,psi)
+      call initvof(n,nh_v,nh_d,dl,dli,zc,zf,dzc,dzf,psi)
       call update_vof(n,dli,nh_d,dzc,dzf,nh_p,nh_v,halo_p,psi,nor,cur_t,kappa,d_thinc)
       !
-      ! call update_property(n,nh_v,(/mu1 ,mu2 /),psi,mu )
-      call update_property_harmonic(n,nh_v,(/mu1,mu2/),psi,mu)
       call update_property(n,nh_v,(/rho1,rho2/),psi,rho)
-      call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_p,dl,dzc,dzf,mu )
       call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_p,dl,dzc,dzf,rho)
+      call update_visc_harmonic(n,nh_v,(/rho1,rho2/),(/mu1,mu2/),rho,psi,mu)
+      call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_p,dl,dzc,dzf,mu)
       call chkdt_tw(n(1),n(2),n(3),dxi,dyi,dzi,nh_d,nh_u,dzci,dzfi,u,v,w,dtmax)
       !
     endif
     !
-    if(any(is_forced(:))) dpdl_c(1:3) = 0._rp
+    if(any(is_forced(:))) dpdl_c(1:3) = 0.0_rp
     !
     ! 0. compute the coefficients for the time advancement
     !
     call cmpt_time_factors(time_scheme,restart,istep,1,rkcoeff,dt,dto,f_t1,f_t2,f_t12)
     f_t12_i = 1._rp/f_t12
     f_t12_o = dto
+    time  = time + f_t12
     !
     ! 1. VoF advection and properties update --> vof^(n+1) 
     !
@@ -681,17 +729,17 @@ program flutas
       !
       call profiler_start("VOF", tag = .true., tag_color = COLOR_YELLOW)
       !
-      call advvof(n,dl,dli,dt,halo_p,halo_v,nh_d,nh_u,nh_v,zc,dzc,dzf,u,v,w,psi,nor,cur_t,kappa,d_thinc, &
+      call advvof(n,dl,dli,dt,halo_p,halo_v,nh_d,nh_u,nh_v,nh_b,zc,zf,dzc,dzf,u,v,w,psi,nor,cur_t,kappa,d_thinc, &
 #if defined(_USE_IBM)
                   nabs_surf,nx_surf,ny_surf,nz_surf,deltan, &
-                  i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2, &
+                  i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+                  WP1,WP2, &
 #endif
                   0)
       !
       call update_property(n,nh_v,(/rho1,rho2/),psi,rho)           
       call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,rho)
-      ! call update_property(n,nh_v,(/mu1,mu2/),psi,mu)
-      call update_property_harmonic(n,nh_v,(/mu1,mu2/),psi,mu)      
+      call update_visc_harmonic(n,nh_v,(/rho1,rho2/),(/mu1,mu2/),rho,psi,mu)     
       call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,mu )
       !
       call profiler_stop("VOF")
@@ -702,7 +750,7 @@ program flutas
     !
     ! 2. two-fluid Navier-Stokes --> (u,v,w,p)^(n+1)
     !
-    rho0i = 1._rp/rho0
+    rho0i = 1.0_rp/rho0
     !
     ! 2a. velocity predictions without source terms
     !
@@ -745,7 +793,7 @@ program flutas
     endif
     !
 #if defined(_USE_IBM)
-    call Penalization_face(u,v,w,cell_u_tag,cell_v_tag,cell_w_tag)
+    call Penalization_face(n,ng,nh_d,nh_b,u,v,w,cell_u_tag,cell_v_tag,cell_w_tag)
 #endif
     call bounduvw(cbcvel,n,bcvel,nh_d,nh_u,halo_u,no_outflow,dl,dzc,dzf,u,v,w) ! we impose bc at end (not valid for all cases)
     !
@@ -822,6 +870,7 @@ program flutas
     ! 
     write(fldnum,'(i9.9)') istep
     !
+    if(myid.eq.0) print*, 'Timestep #', istep, 'Time = ', time
     if(.not.late_init.and.istep.ge.i_late_init) then
       include 'dropcheck.h90'
     endif
@@ -840,7 +889,7 @@ program flutas
       if(time .ge.time_max) is_done = is_done.or..true.
     endif
     if(stop_type(3)) then ! maximum wall-clock time reached
-      tw = (MPI_WTIME()-twi)/3600._rp
+      tw = (MPI_WTIME()-twi)/3600.0_rp
       if(tw   .ge.tw_max  ) is_done = is_done.or..true.
     endif
     !
@@ -861,22 +910,22 @@ program flutas
       endif
       !
       if(myid.eq.0) print*, 'dtmax = ', dtmax, 'dt = ',dt
-      ! if(dtmax.lt.small) then
-        ! if(myid.eq.0) print*, 'ERROR: timestep is too small.'
-        ! if(myid.eq.0) print*, 'Aborting...'
-        ! is_done = .true.
-        ! kill = .true.
-      ! endif
-      dti = 1._rp/dt
+      if(dtmax.lt.small) then
+        if(myid.eq.0) print*, 'ERROR: timestep is too small.'
+        if(myid.eq.0) print*, 'Aborting...'
+        is_done = .true.
+        kill = .true.
+      endif
+      dti = 1.0_rp/dt
       !
       if(myid.eq.0) print*, 'checking the velocity divergence ...'
       call chkdiv(n(1),n(2),n(3),dxi,dyi,dzi,nh_d,nh_u,dzfi,u,v,w,divtot,divmax)
-      ! if(divmax.gt.small.or.divtot.ne.divtot) then
-        ! if(myid.eq.0) print*, 'ERROR: maximum divergence is too large.'
-        ! if(myid.eq.0) print*, 'Aborting...'
-        ! is_done = .true.
-        ! kill = .true.
-      ! endif
+      if(ieee_is_nan(divtot)) then
+        if(myid.eq.0) print*, 'ERROR: Solution has diverged.'
+        if(myid.eq.0) print*, 'Aborting...'
+        is_done = .true.
+        kill = .true.
+      endif
       !
     endif
     !
@@ -888,8 +937,8 @@ program flutas
       !
       call profiler_start("OUT:iout0d", tag = .true., tag_color = COLOR_WHITE)
       !
-      var(:) = 0._rp
-      var(1) = 1._rp*istep
+      var(:) = 0.0_rp
+      var(1) = real(istep,rp)
       var(2) = dt
       var(3) = time
       call out0d(trim(datadir)//'time.out',3,var)
@@ -901,8 +950,8 @@ program flutas
       vol_p1  = sum(psi(1:n(1),1:n(2),1:n(3)))*dl(1)*dl(2)*dl(3)
       call mpi_allreduce(MPI_IN_PLACE,vol_p1 ,1,MPI_REAL_RP,MPI_SUM,MPI_COMM_WORLD,ierr)
       !
-      var(:) = 0._rp
-      var(1) = 1._rp*istep
+      var(:) = 0.0_rp
+      var(1) = real(istep,rp)
       var(2) = dt
       var(3) = time
       var(4) = vof_min
@@ -914,28 +963,30 @@ program flutas
         call cmpt_mean(n(1),n(2),n(3),nh_d,nh_u,dx,dy,dzf,lx,ly,lz,u,meanvelu)
         call cmpt_mean(n(1),n(2),n(3),nh_d,nh_u,dx,dy,dzf,lx,ly,lz,v,meanvelv)
         call cmpt_mean(n(1),n(2),n(3),nh_d,nh_u,dx,dy,dzf,lx,ly,lz,w,meanvelw)
-        var(:)   = 0._rp
+        var(:)   = 0.0_rp
         var(1)   = time
-        var(2)   = 1._rp*istep
+        var(2)   = real(istep,rp)
         var(3:5) = -dpdl_c(1:3)*dti*rho2
         var(6)   = sqrt(maxval(abs(var(3:5)))*lz*0.5_rp)
         var(7)   = rho2*var(6)*0.5_rp*lz/mu2 ! Re_tau
         var(8)   = meanvelu
         var(9)   = meanvelv
-        var(10)  = meanvelw
-        call out0d(trim(datadir)//'forcing.out',10,var)
+        var(11)  = rho2*maxval(abs(var(8:10)))*lz/mu2 ! Re_bulk
+        call out0d(trim(datadir)//'forcing.out',11,var)
       endif 
+#if defined(_USE_IBM)
+      call Wetting_radius(n,ng,nh_v,nh_b, &
+                          time,nabs_surf,psi,deltan, &
+                          i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+                          WP1,WP2, &
+                          dzc,dl,dims)
+#endif
       !
       call profiler_stop("OUT:iout0d")
       !
+    !
     endif
     !
-#if defined(_USE_IBM)
-    ! call Wetting_radius(time,nabs_surf,psi,deltan, &
-                        ! i_IP1,j_IP1,k_IP1, &
-                        ! i_IP2,j_IP2,k_IP2,WP1,WP2, &
-                        ! dzc,dims)
-#endif
 #if defined(_DO_POSTPROC)
     if(mod(istep,iout0d_ta).eq.0.and.do_tagging) then
       call droplet_tagging(n,dims,datadir_ta,dl,nh_d,nh_v,nh_u,halo_v,dzc,dzf,psi,u,v,w,istep,time)
@@ -1034,10 +1085,10 @@ program flutas
     call MPI_ALLREDUCE(dt12,dt12min,1,MPI_REAL_RP,MPI_MIN,MPI_COMM_WORLD,ierr)
     call MPI_ALLREDUCE(dt12,dt12max,1,MPI_REAL_RP,MPI_MAX,MPI_COMM_WORLD,ierr)
     !
-    var(:) = 0._rp
-    var(1) = 1._rp*istep
+    var(:) = 0.0_rp
+    var(1) = real(istep,rp)
     var(2) = time
-    var(3) = dt12av/(1._rp*product(dims))
+    var(3) = dt12av/real(product(dims),rp)
     var(4) = dt12min
     var(5) = dt12max
     call out0d(trim(datadir)//'performance.out',5,var)
@@ -1049,7 +1100,7 @@ program flutas
   !
   call fftend(arrplanp)
   !
-  if(myid.eq.0.and.(.not.kill)) print*, '*** Fim ***'
+  if(myid.eq.0.and.(.not.kill)) print*, '****** Simulation Finished ******'
   !
   call profiler_report()
   !

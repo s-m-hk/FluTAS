@@ -3,7 +3,7 @@
 !
 module mod_solver_cpu
   !
-  use iso_c_binding , only: C_PTR
+  use, intrinsic :: iso_c_binding, only: C_PTR
   use decomp_2d
   use mod_fft       , only: fft
   use mod_common_mpi, only: n_x,n_y,n_z
@@ -111,7 +111,6 @@ module mod_solver_cpu
     !$OMP END WORKSHARE
 #endif
     !
-    return
   end subroutine solver_cpu
   !
   subroutine gaussel(nx,ny,n,a,b,c,lambdaxy,p)
@@ -141,7 +140,6 @@ module mod_solver_cpu
     !$OMP END DO
     !$OMP END PARALLEL
     !
-    return
   end subroutine gaussel
   !
   subroutine gaussel_periodic(nx,ny,n,a,b,c,lambdaxy,p)
@@ -181,7 +179,6 @@ module mod_solver_cpu
     !$OMP END DO
     !$OMP END PARALLEL
     !
-    return
   end subroutine gaussel_periodic
   !
   subroutine dgtsv_homebrewed(n,a,b,c,p)
@@ -219,7 +216,6 @@ module mod_solver_cpu
       p(l) = p(l) - d(l)*p(l+1)
     enddo
     !
-    return
   end subroutine dgtsv_homebrewed
   !
 end module mod_solver_cpu

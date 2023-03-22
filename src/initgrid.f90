@@ -93,7 +93,6 @@ module mod_initgrid
       zc(k) = zf(k-1)+dzc(k-1)
     enddo
     !
-    return
   end subroutine initgrid
   !
   ! grid stretching functions 
@@ -114,7 +113,6 @@ module mod_initgrid
       z = z0
     endif
     !
-    return
   end subroutine gridpoint_cluster_two_end
   !
   subroutine gridpoint_cluster_one_end(alpha,z0,z)
@@ -132,7 +130,6 @@ module mod_initgrid
       z = z0
     endif
     !
-    return
   end subroutine gridpoint_cluster_one_end
   !
   subroutine gridpoint_cluster_middle(alpha,z0,z)
@@ -154,7 +151,6 @@ module mod_initgrid
       z = z0
     endif
     !
-    return
   end subroutine gridpoint_cluster_middle
   !
 end module mod_initgrid

@@ -1,7 +1,7 @@
 # Makefile
 
-ARCH ?= generic
-APP ?= basic
+ARCH ?= nvf_gpu
+APP  ?= two_phase_inc_ibm
 
 include targets/target.$(ARCH)
 include apps/$(APP)/app.$(APP)
@@ -14,7 +14,7 @@ POST_PATH = apps/$(APP)/postp.$(APP) -I./postprocessing
 .SUFFIXES : .o .c .f90
 
 .f90.o:
-	$(FC) $(FFLAGS) $(DFLAGS) $(CPP_FLAGS) -c -I$(POST_PATH) -o $@ $<
+	$(FC) $(FFLAGS) $(DFLAGS) $(PREPROC) -c -I$(POST_PATH) -o $@ $<
 
 .c.o:
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -60,6 +60,10 @@ endif
 
 ifeq ($(DO_POSTPROC),1)
 	OBJS += postprocessing/post.o
+    OBJS += postprocessing/post_other.o
+    OBJS += postprocessing/spectra.o
+    OBJS += postprocessing/fftw_spectra.o
+    DFLAGS += -D_DECOMP_Z
 ifeq ($(USE_VOF),1)
 	OBJS += postprocessing/tagging.o
 endif
@@ -116,15 +120,24 @@ endif
 ###########################################################
 
 TARGET = flutas
+POST = post
 
 all: $(TARGET).$(APP)
 	ln -s $(TARGET).$(APP) $(TARGET)
 
+post: $(TARGET).$(POST)
+
 main.o : apps/$(APP)/$(MAIN_SRC) $(OBJS)
-	$(FC) $(FFLAGS) $(DFLAGS) $(CPP_FLAGS) -I$(POST_PATH) -c -o main.o $<
+	$(FC) $(FFLAGS) $(DFLAGS) $(PREPROC) -I$(POST_PATH) -c -o main.o $<
+
+postMain.o : ./postprocessing/postMain.f90 $(OBJS)
+	$(FC) $(FFLAGS) $(DFLAGS) $(PREPROC) -I$(POST_PATH) -c -o postMain.o $<
 
 $(TARGET).$(APP): $(OBJS) main.o
 	$(FC) $(FFLAGS) $(DFLAGS) $(OBJS) $(LDFLAGS) main.o -o $(TARGET).$(APP)
+
+$(TARGET).$(POST): $(OBJS) postMain.o
+	$(FC) $(FFLAGS) $(DFLAGS) $(OBJS) $(LDFLAGS) postMain.o -o $(TARGET).$(POST)
 
 clean-obj:
 	rm -rf *.o *.mod *dSYM && rm -rf 2decomp/*.{mod,d,o} && rm -rf postprocessing/*.{mod,d,o} && rm -rf apps/$(APP)/*.{mod,d,o}

@@ -27,7 +27,6 @@ module mod_funcs
       ssign = phi/(sqrt(phi**2+delta**2))
     endif
     !
-    return
   end function ssign
   !
   function heaviside(r,eps)
@@ -48,7 +47,6 @@ module mod_funcs
       heaviside = 1._rp
     endif
     !
-    return
   end function heaviside
   !
   function dirac(r,eps)
@@ -67,7 +65,6 @@ module mod_funcs
       dirac = 0.5_rp/eps + 0.5_rp/eps*cos(pi*r/eps)
     endif
     !
-    return
   end function dirac
   !
   function efun(r,eps)
@@ -82,7 +79,6 @@ module mod_funcs
     !
     efun = 0.5_rp*( 1._rp+erf(r/eps) ) 
     !
-    return
   end function efun
   !
   function dir_efun(r,eps)
@@ -98,7 +94,6 @@ module mod_funcs
     !
     dir_efun = (1._rp/(eps*pi))*exp(-(r/eps)**2._rp)
     !
-    return
   end function dir_efun
   !
   function interp_d(vec,vel,q) result(flux) ! divergence form
@@ -119,7 +114,6 @@ module mod_funcs
     flux =      0.0625_rp*(vel)*(-vec(-1+q)+9.0_rp*vec(0+q)+9.0_rp*vec(1+q)-vec(2+q)) &
            + 0.0625_rp*abs(vel)*(-vec(-1+q)+3.0_rp*vec(0+q)-3.0_rp*vec(1+q)+vec(2+q)) 
     !
-    return
   end function interp_d
   !
   function interp_g(vec,vel,dli) result(vel_grad) ! gradient form
@@ -140,7 +134,6 @@ module mod_funcs
     vel_grad =             (vel)*(vec(-2)-8.0_rp*vec(-1)               +8.0_rp*vec(+1)-vec(+2))*(1.0_rp/12.0_rp)*dli & 
                + 3.0_rp*abs(vel)*(vec(-2)-4.0_rp*vec(-1)+6.0_rp*vec(+0)-4.0_rp*vec(+1)+vec(+2))*(1.0_rp/12.0_rp)*dli
     !
-    return
   end function interp_g
   !
 end module mod_funcs 

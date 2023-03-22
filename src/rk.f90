@@ -98,7 +98,6 @@ module mod_rk
     !$OMP END PARALLEL DO
 #endif
     !
-    return
   end subroutine rk
   !
   subroutine cmpt_time_factors(time_scheme,restart,istep,irk_ss,rkcoeff,dt,dto,f_t1,f_t2,f_t12)
@@ -131,7 +130,6 @@ module mod_rk
     end select
     f_t12 = f_t1+f_t2
     !
-    return
   end subroutine cmpt_time_factors
   !
 end module mod_rk

@@ -119,7 +119,6 @@ module mod_gradls
         enddo
       enddo
     enddo
-    return
   end subroutine weno5_old
   !
   subroutine weno5(nx,ny,nz,dxi,dyi,dzi,nh_u,is_f,phi,ux,uy,uz,dphidt)
@@ -270,6 +269,5 @@ module mod_gradls
     !$OMP END PARALLEL DO
 #endif
     !
-    return
   end subroutine weno5
 end module mod_gradls

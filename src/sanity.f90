@@ -60,7 +60,6 @@ module mod_sanity
     call chk_outflow(cbcpre,is_outflow,passed);     if(.not.passed) call flutas_error
     call chk_forcing(cbcpre,is_forced,passed);      if(.not.passed) call flutas_error
     ! 
-    return
   end subroutine test_sanity
   !
   subroutine chk_stop_type(stop_type,passed)
@@ -76,7 +75,6 @@ module mod_sanity
       passed = .false.
     endif
     !
-    return 
   end subroutine chk_stop_type
   !
   subroutine chk_space_time_disc(passed)
@@ -119,7 +117,6 @@ module mod_sanity
     endif
     passed = passed.and.passed_loc
     !
-    return 
   end subroutine chk_space_time_disc
   !
   subroutine chk_dims(ng,dims,ipencil,passed)
@@ -156,7 +153,6 @@ module mod_sanity
     endif
 #endif
     !
-    return
   end subroutine chk_dims
   !
   subroutine chk_bc(cbcvel,cbcpre,bcvel,bcpre,passed)
@@ -237,7 +233,6 @@ module mod_sanity
     passed = passed.and.passed_loc
 #endif
     !
-    return 
   end subroutine chk_bc
   !
   subroutine chk_outflow(cbcpre,is_outflow,passed)
@@ -262,7 +257,6 @@ module mod_sanity
     if(myid.eq.0.and.(.not.passed)) &
       print*, 'ERROR: Dirichlet pressure BC should be an outflow direction; check the BC or is_outflow in dns.in.'
     !
-    return 
   end subroutine chk_outflow
   !
   subroutine chk_forcing(cbcpre,is_forced,passed)
@@ -305,7 +299,6 @@ module mod_sanity
     !
 #endif
     !
-    return 
   end subroutine chk_forcing
   !
   subroutine flutas_error(error)
@@ -328,7 +321,6 @@ module mod_sanity
     call MPI_FINALIZE(ierr)
     call exit
     !
-    return
   end subroutine flutas_error
   !
 end module mod_sanity

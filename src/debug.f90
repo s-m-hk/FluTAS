@@ -58,7 +58,6 @@ module mod_debug
     call mpi_allreduce(MPI_IN_PLACE,mean,1,MPI_REAL_RP,MPI_SUM,MPI_COMM_WORLD,ierr)
     mean = mean/(1._rp*lx*ly*lz)
     !
-    return
   end subroutine cmpt_mean
   !
 end module mod_debug

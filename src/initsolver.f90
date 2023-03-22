@@ -3,8 +3,8 @@
 !
 module mod_initsolver
   !
+  use, intrinsic :: iso_c_binding, only: C_PTR
   use decomp_2d     , only: zstart
-  use iso_c_binding , only: C_PTR
   use mod_common_mpi, only: ijk_start_z,n_x,n_y,n_z
   use mod_fft       , only: fftini
   use mod_param     , only: pi
@@ -116,7 +116,6 @@ module mod_initsolver
     !
     call fftini(n_x,n_y,cbc(:,1:2),c_or_f(1:2),arrplan,normfft)
     !
-    return
   end subroutine initsolver
   !
   subroutine eigenvalues(n,bc,c_or_f,lambda)
@@ -181,8 +180,7 @@ module mod_initsolver
         lambda(l)   = -4._rp*sin((1._rp*(2*l-1))*pi/(4._rp*n))**2
       enddo
     end select
-    ! 
-    return
+    !
   end subroutine eigenvalues
   !
   subroutine tridmatrix(bc,n,dzi,nh_d,dzci,dzfi,c_or_f,a,b,c)
@@ -242,7 +240,6 @@ module mod_initsolver
     b(:) = b(:)! + eps
     c(:) = c(:)! + eps
     !
-    return
   end subroutine tridmatrix
   !
   subroutine bc_rhs(cbc,n,bc,dlc,dlf,c_or_f,rhs)
@@ -294,7 +291,6 @@ module mod_initsolver
       rhs(:,:,ibound) = factor(ibound)/dlc(ibound)/dlf(ibound)
     end forall
     !
-    return
   end subroutine bc_rhs
   !
 end module mod_initsolver

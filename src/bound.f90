@@ -140,7 +140,6 @@ module mod_bound
       enddo
     enddo
     !
-    return
   end subroutine bounduvw
   !
   subroutine boundp(cbc,n,bc,nh_d,nh_p,halo,dl,dzc,dzf,p)
@@ -221,7 +220,6 @@ module mod_bound
       call set_bc(n(1),n(2),n(3),cbc(1,3),1,3,.true.,bc(1,3),qmin,nh_p,dr,p)
     endif
     !
-    return
   end subroutine boundp
   !
   subroutine set_bc(nx,ny,nz,ctype,ibound,idir,centered,rvalue,qq_d,nh_p,dr,p)
@@ -642,7 +640,6 @@ module mod_bound
       endif
     end select
     !
-    return
   end subroutine set_bc
   !
   ! TODO: Add GPU here? 
@@ -769,7 +766,6 @@ module mod_bound
       endif
     end select
     !
-    return
   end subroutine outflow
   !
   ! TODO: add GPU here?
@@ -823,7 +819,6 @@ module mod_bound
       endif 
     end select
     !
-    return
   end subroutine inflow
   !
   subroutine updt_rhs_b(nx,ny,nz,c_or_f,cbc,nh_p,rhsbx,rhsby,rhsbz,p)
@@ -940,7 +935,6 @@ module mod_bound
       !$OMP END PARALLEL DO
     endif
     !
-    return
   end subroutine updt_rhs_b
   !
   subroutine updthalo(nx,ny,nz,nh,halo,idir,p)
@@ -1111,7 +1105,6 @@ module mod_bound
     !
     end select
     !
-    return
     !
   end subroutine updthalo
   !

@@ -9,6 +9,7 @@ module mod_cmpt_divth
   use mod_types
   use mod_common_mpi
   !@cuf use cudafor
+  !@cuf use mod_common_mpi, only: mydev
   !
   implicit none
   !
@@ -34,7 +35,6 @@ module mod_cmpt_divth
     real(rp) :: kappaxp,kappaxm,kappayp,kappaym, &
                 kappazp,kappazm
     integer  :: i,j,k,im,jm,km,ip,jp,kp
-    !
     !@cuf attributes(managed) :: vof, kappa, div_th, s
     !
 #if defined(_OPENACC)
@@ -88,7 +88,6 @@ module mod_cmpt_divth
     !$OMP END PARALLEL DO
 #endif
     !
-    return
   end subroutine cmpt_divth
   !
   subroutine cmpt_density(nx,ny,nz,dx,dy,dz,nh_t,nh_t,p0,ri,rho2,psi,tmp,gas_mass,flag,rho0,rho)
@@ -108,6 +107,7 @@ module mod_cmpt_divth
     !
     integer :: i,j,k
     real(rp):: rho_gas,rho_liq
+    !@cuf integer :: istat
     !@cuf attributes(managed) :: psi, tmp, rho
     !
     if(flag) gas_mass = 0._rp
@@ -139,10 +139,10 @@ module mod_cmpt_divth
 #endif
     !
     rho0 = minval(rho(1:nx,1:ny,1:nz))
+    !@cuf istat=cudaDeviceSynchronize()
     call mpi_allreduce(MPI_IN_PLACE,rho0,1,MPI_REAL_RP,MPI_MIN,MPI_COMM_WORLD,ierr)
     if(flag) call mpi_allreduce(MPI_IN_PLACE,gas_mass,1,MPI_REAL_RP,MPI_SUM,MPI_COMM_WORLD,ierr)
     !
-    return
   end subroutine cmpt_density
   !
   subroutine cmpt_e_div(nx,ny,nz,dx,dy,dz,lx,ly,lz,nh_u,div_th,u,v,w,e_div,e_div_mean)
@@ -160,7 +160,7 @@ module mod_cmpt_divth
     integer :: i,j,k
     real(rp):: lxi,lyi,lzi,dxi,dyi,dzi
     real(rp):: div_s,e_div_v
-    !
+    !@cuf integer :: istat
     !@cuf attributes(managed) :: div_th, u, v, w
     !
     lxi = 1._rp/lx
@@ -203,10 +203,10 @@ module mod_cmpt_divth
 #else
     !$OMP END PARALLEL DO
 #endif
+    !@cuf istat=cudaDeviceSynchronize()
     call mpi_allreduce(MPI_IN_PLACE,e_div     ,1,MPI_REAL_RP,MPI_MAX,MPI_COMM_WORLD,ierr)
     call mpi_allreduce(MPI_IN_PLACE,e_div_mean,1,MPI_REAL_RP,MPI_SUM,MPI_COMM_WORLD,ierr)
     !
-    return
   end subroutine cmpt_e_div
   !
 end module mod_cmpt_divth

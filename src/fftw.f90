@@ -3,7 +3,7 @@
 !
 module mod_fftw_param
   use mod_types
-  use iso_c_binding
+  use, intrinsic :: iso_c_binding
 #if defined(_OPENACC)
   use cufft
 #endif
@@ -43,7 +43,7 @@ module mod_fftw_param
   integer FFTW_HC2R
   parameter (FFTW_HC2R=1)
   !
-  integer REDFT00
+  integer FFTW_REDFT00
   parameter (FFTW_REDFT00=3)
   integer FFTW_REDFT01
   parameter (FFTW_REDFT01=4)

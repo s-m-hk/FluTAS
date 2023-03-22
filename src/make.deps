@@ -4,6 +4,10 @@ postprocessing/fftw_spectra.o : types.o
 postprocessing/post.o : common_mpi.o
 postprocessing/post.o : apps/$(APP)/param.o
 postprocessing/post.o : types.o
+postprocessing/post_other.o : bound.o
+postprocessing/post_other.o : common_mpi.o
+postprocessing/post_other.o : apps/$(APP)/param.o
+postprocessing/post_other.o : types.o
 postprocessing/postMain.o : bound.o
 postprocessing/postMain.o : common_mpi.o
 postprocessing/postMain.o : initgrid.o
@@ -17,12 +21,9 @@ postprocessing/postMain.o : types.o
 postprocessing/postMain.o : vof.o
 postprocessing/postMain.o : 2decomp/decomp_2d.o
 postprocessing/postMain.o : post.o
-postprocessing/postMain.o : spectra.o
+postprocessing/postMain.o : post_other.o
+postprocessing/postMain.o : postprocessing/spectra.o
 postprocessing/postMain.o : tagging.o
-postprocessing/post_other.o : bound.o
-postprocessing/post_other.o : common_mpi.o
-postprocessing/post_other.o : apps/$(APP)/param.o
-postprocessing/post_other.o : types.o
 postprocessing/post_zpencil.o : bound.o
 postprocessing/post_zpencil.o : common_mpi.o
 postprocessing/post_zpencil.o : apps/$(APP)/param.o
@@ -31,7 +32,7 @@ postprocessing/spectra.o : common_mpi.o
 postprocessing/spectra.o : apps/$(APP)/param.o
 postprocessing/spectra.o : types.o
 postprocessing/spectra.o : 2decomp/decomp_2d.o
-postprocessing/spectra.o : fftw_spectra.o
+postprocessing/spectra.o : postprocessing/fftw_spectra.o
 postprocessing/tagging.o : bound.o
 postprocessing/tagging.o : common_mpi.o
 postprocessing/tagging.o : apps/$(APP)/param.o

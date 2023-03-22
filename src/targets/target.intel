@@ -2,32 +2,28 @@
 #
 # INTEL (cpu only)
 #
-CPP_FLAGS := -fpp 
+PREPROC   := -fpp 
 CC        := mpiicc
 FC        := mpiifort  
 ifeq ($(DO_DBG),1)
-  DBG       := -O0 -g -traceback -fpe0 -check bounds -check uninit #-check all -debug all
+  DBG       := -check bounds -g -traceback -warn declarations -gen-interfaces -warn interfaces -fpe0 #-fp-stack-check -check all
 else
   OPT       := -O3 -xHost
 endif
-PRE       := #-r8
+PRE         :=
 
 # Take all the compiler flags together
 FFLAGS  := $(OPT) $(DBG) $(PRE)
 DFLAGS  := -D_TIMING -D_EPA2A -D_DECOMP_Z #-D_TWOD
-DFLAGS  += -D_OVERWRITE -D_EVEN # FFLAGS_2DECOMP
+DFLAGS  += #-D_OVERWRITE -D_EVEN # FFLAGS_2DECOMP
 LDFLAGS :=
 
 # Architecture switches
 USE_NVTX = 0
 
 # Required for FFTW
-FFTW_HOME := /scratch/smhk2/Software/fftw-intel
-LDFLAGS   += -L${FFTW_HOME}/lib -lfftw3
+LDFLAGS   += -L${FFTW_ROOT}/lib -lfftw3 -lfftw3_threads
 
 # Required for INIT_MONTECARLO
-#GSL_LIB   += -lgsl -lgslcblas -lm -lstdc++
-#GSL_INC   += 
-
-# Required for NVTX
-# NVTX_LIB   +=
+#GSL_LIB   += -L~/lib -lgsl -lgslcblas -lm -lstdc++
+#GSL_INC   += -I~/include

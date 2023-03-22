@@ -56,7 +56,6 @@ module mod_output
       close(iunit)
     endif
     !
-    return
   end subroutine out0d
   !
   subroutine out1d(fname,n,dims,dl,idir,nh_d,nh_p,z,dzlzi,p)
@@ -180,7 +179,6 @@ module mod_output
     !
     deallocate(p1d)
     !
-    return
   end subroutine out1d
   !
   subroutine out2d(fname,inorm,islice,p)
@@ -209,7 +207,6 @@ module mod_output
       call decomp_2d_write_plane(ipencil,p,inorm,islice,fname)
     end select
     !
-    return
   end subroutine out2d
   !
   subroutine out3d(fname,nskip,p)
@@ -239,7 +236,6 @@ module mod_output
     call decomp_2d_write_every(ipencil,p,nskip(1),nskip(2),nskip(3),fname,.true.)
     call MPI_FILE_CLOSE(fh,ierr)
     !
-    return
   end subroutine out3d
   !
   subroutine write_log_output(fname,fname_fld,varname,nmin,nmax,nskip,time,istep)
@@ -273,7 +269,6 @@ module mod_output
       close(iunit)
     endif
     !
-    return
   end subroutine write_log_output
   !
   subroutine write_visu_3d(datadir,fname_bin,fname_log,varname,nmin,nmax,nskip,time,istep,p)
@@ -291,7 +286,6 @@ module mod_output
     call out3d(trim(datadir)//trim(fname_bin),nskip,p)
     call write_log_output(trim(datadir)//trim(fname_log),trim(fname_bin),trim(varname),nmin,nmax,nskip,time,istep)
     !
-    return
   end subroutine write_visu_3d
   !
   subroutine write_visu_2d(datadir,fname_bin,fname_log,varname,inorm,nslice,ng,time,istep,p)
@@ -322,7 +316,6 @@ module mod_output
     end select
     call write_log_output(trim(datadir)//trim(fname_log),trim(fname_bin),trim(varname),nmin_2d,nmax_2d,[1,1,1],time,istep)
     !
-    return
   end subroutine write_visu_2d
   !
 end module mod_output

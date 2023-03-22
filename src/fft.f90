@@ -3,7 +3,7 @@
 !
 module mod_fft
   !
-  use iso_c_binding , only: C_INT
+  use, intrinsic :: iso_c_binding, only: C_INT
   use mod_common_mpi, only: ierr,myid
   use mod_fftw_param
   use mod_param     , only: pi
@@ -153,7 +153,6 @@ module mod_fft
     arrplan(1, 2) = plan_fwd_y
     arrplan(2, 2) = plan_bwd_y
     !
-    return
   end subroutine fftini
   !
   subroutine fftend(arrplan)
@@ -175,7 +174,6 @@ module mod_fft
     !$call dfftw_cleanup_threads(ierr)
 #endif
     !
-    return
   end subroutine fftend
   !
   subroutine fft(plan,arr)
@@ -189,7 +187,6 @@ module mod_fft
 #else
     call dfftw_execute_r2r(plan, arr, arr)
 #endif
-    return
   end subroutine fft
   !
 #if defined(_OPENACC)
@@ -208,7 +205,6 @@ module mod_fft
     istat = cufftExecD2Z(plan, arrin, arrout)
 #endif
     !
-    return
   end subroutine fftf_gpu
   !
   subroutine fftb_gpu(plan, arrin, arrout)
@@ -226,7 +222,6 @@ module mod_fft
     istat = cufftExecZ2D(plan, arrin, arrout)
 #endif
     !
-    return
   end subroutine fftb_gpu
 #endif
   !
@@ -287,7 +282,6 @@ module mod_fft
       end select
     end if
     !
-    return
   end subroutine find_fft
   !
 #if defined(_OPENACC)
@@ -319,7 +313,6 @@ module mod_fft
       !
     end select
     !
-    return
   end subroutine posp_fftf
   !
   subroutine prep_fftb(n1, n2, n3, idir, arr)
@@ -353,7 +346,6 @@ module mod_fft
       !
     end select
     !
-    return
   end subroutine prep_fftb
   !
   subroutine prep_dctiif(n1, n2, n3,idir,arr,is_swap_order,is_negate_even)
@@ -456,7 +448,6 @@ module mod_fft
       !deallocate(arr_tmp)
     end select
     !
-    return
   end subroutine prep_dctiif
   !
   subroutine posp_dctiif(n1, n2, n3,idir,arr,is_swap_order,is_negate_even)
@@ -577,7 +568,6 @@ module mod_fft
       end if
     end select
     !
-    return
   end subroutine posp_dctiif
   !
   subroutine prep_dctiib(n1, n2, n3, idir, arr, is_swap_order, is_negate_even)
@@ -689,7 +679,6 @@ module mod_fft
        !deallocate(arr_tmp)
     end select
     !
-    return
   end subroutine prep_dctiib
   !
   subroutine posp_dctiib(n1, n2, n3, idir, arr, is_swap_order, is_negate_even)
@@ -786,7 +775,6 @@ module mod_fft
        !deallocate(arr_tmp)
     end select
     !
-    return
   end subroutine posp_dctiib
   !
   subroutine signal_processing(pre_or_pos,f_or_b,cbc,c_or_f,n,idir,arr)
@@ -883,7 +871,6 @@ module mod_fft
       call exit
     end select
     !
-    return
   end subroutine signal_processing
 #endif
   !

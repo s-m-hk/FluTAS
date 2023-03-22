@@ -152,7 +152,6 @@ module mod_initmpi
     n(2) = ng(2)/dims(2)
     n(3) = ng(3)/dims(3)
     !
-    return
   end subroutine initmpi
   !
   subroutine halo_gen(n,nh,halos)
@@ -177,7 +176,6 @@ module mod_initmpi
     call MPI_TYPE_COMMIT(halos(2),ierr)
     call MPI_TYPE_COMMIT(halos(3),ierr)
     !
-    return 
   end subroutine halo_gen
   !
 #if defined(_OPENACC)
@@ -261,7 +259,6 @@ module mod_initmpi
     !
 #endif
     !
-    return
   end subroutine alloc_buf
 #endif
   !

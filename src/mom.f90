@@ -193,7 +193,6 @@ module mod_mom
     !$acc end kernels 
     !$OMP END PARALLEL DO
     !
-    return
   end subroutine momad_xyz_tw_cen
   !
   subroutine momad_xyz_tw_fll(nx,ny,nz,dxi,dyi,dzi,nh_d,nh_u,dzci,dzfi,u,v,w,mu,rho, &
@@ -430,7 +429,6 @@ module mod_mom
     !$acc end kernels 
     !$OMP END PARALLEL DO
     !
-    return
   end subroutine momad_xyz_tw_fll
 #else
   subroutine momad_xyz_sp(nx,ny,nz,dxi,dyi,dzi,nh_d,nh_u,dzci,dzfi,u,v,w,dudt,dvdt,dwdt)  
@@ -570,7 +568,6 @@ module mod_mom
     !$acc end kernels 
     !$OMP END PARALLEL DO
     !
-    return
   end subroutine momad_xyz_sp
 #endif
   !

@@ -1,16 +1,16 @@
 # Compiler definitions
 #
-# NVFORTRAN (cpu/gpu version)
+# NVFORTRAN (gpu version)
 #
-CPP_FLAGS := -cpp 
+PREPROC   := -Mpreprocess 
 CC        := mpicc
 FC        := mpifort 
 ifeq ($(DO_DBG),1)
   DBG       := -Minform=inform -Mchkstk -g -O0 -traceback -Mbounds
 else
-  OPT       := -Minfo=accel -fast -O3
+  OPT       := -fast -O3 -Minfo=accel
 endif
-PRE       := #-r8
+PRE         :=
 
 # Take all the compiler flags together
 FFLAGS  := $(OPT) $(DBG) $(PRE)
@@ -25,10 +25,8 @@ LDFLAGS :=
 USE_NVTX = 0
 
 # Required for FFTW
-FFTW_HOME := /lscratch/smhk2/Software/AMD/amd-fftw
-LDFLAGS   += -L${FFTW_HOME}/lib -lfftw3
-
-FFLAGS    += -cuda -acc -gpu=cc86,cuda11.4,lineinfo -cudalib=cufft,curand 
+LDFLAGS   += -L${FFTW_ROOT}/lib -lfftw3
+FFLAGS    += -cuda -acc -gpu=cc75,cuda11.4,lineinfo -cudalib=cufft,curand 
 DFLAGS    += -D_EPHC -D_GPU_MPI
 
 # Required for INIT_MONTECARLO

@@ -3,7 +3,7 @@
 !
 module mod_param
   !
-  ! for easy to read we recommend to:
+  ! For easy to read we recommend to:
   !    1. First, declare the variables to be determined from '*.in' files;
   !    2. Next, declare the auxiliaries variable not determined from '*.in' files;
   !    3. Finally, declare the parameter variables.
@@ -23,6 +23,7 @@ module mod_param
   real(rp)                             :: gr
   real(rp)                             :: cfl,dt_input
   logical                              :: constant_dt
+  character(len=3)                     :: time_scheme,space_scheme_mom
   real(rp)                             :: rho_sp,mu_sp
   character(len=100)                   :: inivel
   logical                              :: is_wallturb
@@ -45,20 +46,38 @@ module mod_param
   integer, dimension(2)                :: dims_in  ! input (user-choice for a 2D decomp.)
   integer                              :: nthreadsmax
   !
-#if defined(_HEAT_TRANSFER)
+  !  --> from vof.in (always defined in this app)
   !
-  !  --> from heat_transfer_sp.in (if defined)
+  real(rp) :: rho1,rho2,mu1,mu2,theta1,theta2
+  character(len=3) :: inivof
+  real(rp),  allocatable, dimension(:) :: xc_bub, yc_bub, zc_bub, r_bub
+  character(len=1), dimension(0:1,3) :: cbcvof
+  real(rp)        , dimension(0:1,3) ::  bcvof
+  real(rp) :: xc, yc, zc, r
+  real(rp) :: sigma
+  logical  :: late_init
+  integer  :: nbub=0, i_b,i_late_init
+#if defined(_USE_IBM)
+  !
+  character(len=4) :: surface_type
+  real(rp) :: xc_ibm, yc_ibm, zc_ibm, r_ibm
+  real(rp) :: zmax_ibm, zmin_ibm
+  real(rp) :: solid_height_ratio
+  real(rp) :: Rotation_angle
+  real(rp) :: d1,d2
+  !
+#endif
+  !  --> from heat_transfer.in (always defined in this app)
   !
   character(len=3) :: initmp
-  real(rp) :: tmp0
-  real(rp) :: cp_sp,cv_sp,kappa_sp
+  real(rp)         :: cp1,cv1,kappa1
+  real(rp)         :: cp2,cv2,kappa2
+  real(rp)         :: tl0,tg0
 #if defined(_BOUSSINESQ)
-  real(rp) :: beta_sp_th
+  real(rp)         :: tmp0,beta1_th,beta2_th
 #endif
   character(len=1), dimension(0:1,3) :: cbctmp
   real(rp)        , dimension(0:1,3) ::  bctmp
-  !
-#endif
   !
 #if defined(_TURB_FORCING)
   !
@@ -73,11 +92,20 @@ module mod_param
   !
 #if defined(_DO_POSTPROC)
   !
-  !  --> from post_sp.in (if defined)
+  !  --> from post.in (if defined)
   !
-  real(rp) :: deltaT
   logical  :: do_avg,do_favre,do_wall
+  real(rp) :: deltaT
   integer  :: avg_dir,time_deltai,wall_deltai
+  !
+#endif
+  !
+#if defined(_USE_VOF) && (_DO_POSTPROC) 
+  !
+  !  --> from post_vof.in (if defined)
+  !
+  logical :: do_tagging
+  integer :: iout0d_ta
   !
 #endif
   !
@@ -90,17 +118,15 @@ module mod_param
   real(rp), dimension(3) :: dl
   real(rp), dimension(3) :: dli
   real(rp) :: dxi,dyi,dzi,dx,dy,dz
-  character(len=3) :: time_scheme,space_scheme_mom
-  integer  :: n_stage
-  real(rp) :: cfl_c,cfl_d
-#if defined(_HEAT_TRANSFER)
+  real(rp) :: rho0
   real(rp) :: gam_g
-#endif
+  real(rp) :: cfl_c,cfl_d
+  integer  :: n_stage
   !
   ! 3. parameters, e.g., pi, RK coefficients, small, universal constants etc.
   !
-  real(rp), parameter :: pi = acos(-1._rp)
-  real(rp), parameter :: small = epsilon(pi)*10**(precision(pi)/2._rp)
+  real(rp), parameter :: pi = 4._rp*atan(1._rp)
+  real(rp), parameter :: small = epsilon(pi)*10**(precision(pi)/4._rp)
   logical , parameter, dimension(2,3) :: no_outflow = & 
       reshape((/.false.,.false.,   & ! no outflow in x lower,upper bound
                 .false.,.false.,   & ! no outflow in y lower,upper bound
@@ -163,37 +189,116 @@ module mod_param
       call exit
     endif
     close(iunit)
-    ! 
-    ! load input files from heat_transfer_sp.in (if defined)
+    !  
+    ! load two-phase input files
     !
-#if defined(_HEAT_TRANSFER)
-    open(newunit=iunit,file='heat_transfer_sp.in',status='old',action='read',iostat=ierr)
+    open(newunit=iunit,file='vof.in',status='old',action='read',iostat=ierr)
+    if( ierr.eq.0 ) then
+      read(iunit,*) rho1, rho2, mu1, mu2
+      read(iunit,*) inivof
+      read(iunit,*) nbub
+      read(iunit,*) xc, yc, zc, r
+      read(iunit,*) cbcvof(0,1 ),cbcvof(1,1 ),cbcvof(0,2 ),cbcvof(1,2 ),cbcvof(0,3 ),cbcvof(1,3 )
+      read(iunit,*) bcvof(0,1  ),bcvof(1,1  ),bcvof(0,2  ),bcvof(1,2  ),bcvof(0,3  ),bcvof(1,3  )
+      read(iunit,*) sigma
+      read(iunit,*) late_init, i_late_init
+      read(iunit,*) theta1,theta2
+    else
+      if(myid.eq.0) print*, 'Error reading the vof.in input file' 
+      if(myid.eq.0) print*, 'Input file missing or incomplete' 
+      if(myid.eq.0) print*, 'Aborting...'
+      call MPI_FINALIZE(ierr)
+      call exit
+    endif
+    rho0 = min(rho1,rho2)
+    close(iunit)
+    !
+    if(nbub.gt.0) then
+      allocate(xc_bub(nbub), yc_bub(nbub), zc_bub(nbub), r_bub(nbub))
+      open(newunit=iunit,file='bub.in',status='old',action='read',iostat=ierr)
+      if( ierr.eq.0 ) then    
+        do i_b=1,nbub
+          read(iunit,*) xc_bub(i_b), yc_bub(i_b), zc_bub(i_b), r_bub(i_b)
+        enddo
+      else
+        if(myid.eq.0) print*, 'Error reading the bub.in input file' 
+        if(myid.eq.0) print*, 'Input file missing or incomplete' 
+        if(myid.eq.0) print*, 'Aborting...'
+        call MPI_FINALIZE(ierr)
+        call exit
+      endif
+      close(iunit)
+    endif
+    !
+    ! load input files from heat_transfer.in (always defined in this app)
+    !
+    open(newunit=iunit,file='heat_transfer.in',status='old',action='read',iostat=ierr)
     if( ierr.eq.0 ) then
       read(iunit,*) initmp
-      read(iunit,*) tmp0
-      read(iunit,*) cp_sp
-      read(iunit,*) cv_sp
-      read(iunit,*) kappa_sp
+      read(iunit,*) tl0,tg0
+      read(iunit,*) cp1,cp2
+      read(iunit,*) cv1,cv2
+      read(iunit,*) kappa1,kappa2
       read(iunit,*) cbctmp(0,1 ),cbctmp(1,1 ),cbctmp(0,2 ),cbctmp(1,2 ),cbctmp(0,3 ),cbctmp(1,3 )
       read(iunit,*) bctmp(0,1  ),bctmp(1,1  ),bctmp(0,2  ),bctmp(1,2  ),bctmp(0,3  ),bctmp(1,3  )
 #if defined(_BOUSSINESQ)
-      read(iunit,*) beta_sp_th
+      read(iunit,*) tmp0,beta1_th,beta2_th
 #endif
       else
-        if(myid.eq.0) print*, 'Error reading the heat_transfer_sp.in input file' 
+        if(myid.eq.0) print*, 'Error reading the heat_transfer.in input file' 
         if(myid.eq.0) print*, 'Input file missing or incomplete' 
         if(myid.eq.0) print*, 'Aborting...'
         call MPI_FINALIZE(ierr)
         call exit
       endif
     close(iunit)
-    gam_g = cp_sp/cv_sp
-#endif
     !
     ! load input files from single-phase postprocessing (if defined)
-    ! 
-#if defined(_DO_POSTPROC)
-    open(newunit=iunit,file='post_sp.in',status='old',action='read',iostat=ierr)
+    !
+#if defined(_USE_VOF) && defined(_DO_POSTPROC)
+    inquire(file='post_vof.in',exist=exists)
+    if(exists) then
+      open(newunit=iunit,file='post_vof.in',status='old',action='read',iostat=ierr)
+      if( ierr.eq.0 ) then
+        read(iunit,*) do_tagging,iout0d_ta
+      else
+        if(myid.eq.0) print*, 'Error reading the post_vof.in input file' 
+        if(myid.eq.0) print*, 'Input file missing or incomplete' 
+        if(myid.eq.0) print*, 'Aborting...'
+        call MPI_FINALIZE(ierr)
+        call exit
+      endif
+    else
+      do_tagging = .false.
+      iout0d_ta  = 1
+    endif
+    close(iunit)
+#endif
+    !  
+    ! load ibm forcing input files (if defined)
+    !
+#if defined(_USE_IBM)
+    open(newunit=iunit,file='ibm.in',status='old',action='read',iostat=ierr)
+      if( ierr.eq.0 ) then
+		read(iunit,*) surface_type
+        read(iunit,*) xc_ibm, yc_ibm, zc_ibm, r_ibm
+        read(iunit,*) zmax_ibm, zmin_ibm
+        read(iunit,*) solid_height_ratio
+        read(iunit,*) Rotation_angle
+        read(iunit,*) d1,d2
+      else
+        if(myid.eq.0) print*, 'Error reading the IBM input file'
+        if(myid.eq.0) print*, 'Aborting...'
+        call MPI_FINALIZE(ierr)
+        call exit
+    endif
+    close(iunit)
+#endif
+    !
+    ! load input files from heat_transfer postprocessing (if defined)
+    !
+#if defined(_HEAT_TRANSFER) && defined(_DO_POSTPROC)
+    open(newunit=iunit,file='post.in',status='old',action='read',iostat=ierr)
     if( ierr.eq.0 ) then
       read(iunit,*) do_avg
       read(iunit,*) avg_dir 
@@ -246,6 +351,12 @@ module mod_param
     dl  = (/dx  ,dy  ,dz  /)
     dli = (/dxi ,dyi ,dzi /)
     !
+    ! for consistency, we replace rho_sp and mu_sp with rho2 and mu2.
+    ! Anyway, rho_sp and mu_sp are not employed if (_USE_VOF) flag is active
+    !
+    rho_sp = rho2 
+    mu_sp  = mu2
+    !
     ! compute the cfl and other stuff related to
     ! the time discretization
     !
@@ -267,13 +378,13 @@ module mod_param
     elseif(avg_dir.eq.3) then
       deltaT = abs(bctmp(0,3)-bctmp(1,3))
     else
-      if(myid.eq.0) print*, 'Invalid averaging direction. Please provide one in post_sp.in' 
+      if(myid.eq.0) print*, 'Invalid averaging direction. Please provide one in post.in' 
       call MPI_FINALIZE(ierr)
       call exit
     endif
 #endif
+    gam_g = cp1/cv1
     !
-    return
   end subroutine read_input
   !
 end module mod_param

@@ -12,8 +12,8 @@
 module profiler
   !
   use iso_fortran_env, only: real64, stdout => output_unit
+  use, intrinsic :: iso_c_binding
   use mpi
-  use iso_c_binding
   !
   implicit none
   save
@@ -58,13 +58,13 @@ module profiler
   interface nvtxRangePush
     ! push range with custom label and standard color
     subroutine nvtxRangePushA(name) bind(C, name='nvtxRangePushA')
-        use iso_c_binding
+        use, intrinsic :: iso_c_binding
         character(kind=C_CHAR, len=*) :: name
     end subroutine nvtxRangePushA
     !
     ! push range with custom label and custom color
     subroutine nvtxRangePushEx(event) bind(C, name='nvtxRangePushEx')
-        use iso_c_binding
+        use, intrinsic :: iso_c_binding
         import :: nvtxEventAttributes
         type(nvtxEventAttributes) :: event
     end subroutine nvtxRangePushEx
@@ -97,7 +97,6 @@ contains
     !
     call MPI_COMM_RANK(MPI_COMM_WORLD, my_rank, ierr)
     !
-    return
   end subroutine profiler_init
   !
   subroutine profiler_start(label, tag, tag_color)
@@ -152,7 +151,6 @@ contains
       end if
     end if
     !
-    return
   end subroutine profiler_start
   !
   subroutine profiler_stop(label)
@@ -183,7 +181,6 @@ contains
       !
     end do
     !
-    return
   end subroutine profiler_stop
   !
   subroutine profiler_report()
@@ -201,7 +198,6 @@ contains
       !
     end do
     !
-    return
   end subroutine profiler_report
   !
 #if defined(_USE_NVTX)

@@ -10,6 +10,7 @@ module mod_vof
   !
   use mod_types, only: rp
   !@cuf use cudafor
+  !@cuf use mod_common_mpi, only: mydev
   !
   implicit none
   !
@@ -35,18 +36,19 @@ module mod_vof
                                                         rpp,rpp,0.0_rp/),shape(xpp))
   !@cuf attributes(managed) :: xmm, xmp, xpm, xpp
   !
-  real(rp), allocatable, dimension(:,:,:) :: dvof1,dvof2,dvof3,flux
-  !@cuf attributes(managed) :: dvof1,dvof2,dvof3,flux
+  real(rp), allocatable, dimension(:,:,:) :: dvof1,dvof2,flux
+  !@cuf attributes(managed) :: dvof1,dvof2,flux
   !
   private
-  public  :: advvof,update_vof,update_property,update_property_harmonic,initvof
+  public  :: advvof,update_vof,update_property,update_property_harmonic,update_visc_harmonic,initvof
   !
   contains
   !
-  subroutine advvof(n,dl,dli,dt,halo_p,halo_v,nh_d,nh_u,nh_v,zc,dzc,dzf,ug,vg,wg,vof,nor,cur,kappa,d_thinc, &
+  subroutine advvof(n,dl,dli,dt,halo_p,halo_v,nh_d,nh_u,nh_v,nh_b,zc,zf,dzc,dzf,ug,vg,wg,vof,nor,cur,kappa,d_thinc, &
 #if defined(_USE_IBM)
                     nabs_surf,nx_surf,ny_surf,nz_surf,deltan, &
-                    i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2, &
+                    i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+                    WP1,WP2, &
 #endif
                     dummy)
     !
@@ -58,40 +60,53 @@ module mod_vof
     !
     implicit none
     !
-    integer , intent(in   )                                     :: dummy
     integer , intent(in   ), dimension(3)                       :: n
     real(rp), intent(in   ), dimension(3)                       :: dl,dli
     real(rp), intent(in   )                                     :: dt
     integer , intent(in   ), dimension(3)                       :: halo_p,halo_v
-    integer , intent(in   )                                     :: nh_d,nh_u,nh_v
-    real(rp), intent(in   ), dimension(1-nh_d:)                 :: zc,dzc,dzf
-    real(rp), intent(in   ), dimension(1-nh_u:,1-nh_u:,1-nh_u:) :: ug,vg,wg ! interface velocity
+    integer , intent(in   )                                     :: nh_d,nh_u,nh_v,nh_b
+    real(rp), intent(in   ), dimension(1-nh_d:)                 :: zc,zf,dzc,dzf
+    real(rp), intent(in   ), dimension(1-nh_u:,1-nh_u:,1-nh_u:) :: ug,vg,wg
     real(rp), intent(inout), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
     real(rp), intent(inout), dimension(0:,0:,0:,1:)             :: nor,cur
-    real(rp), intent(inout), dimension(0:,0:,0:)                :: kappa    ! curvature
+    real(rp), intent(inout), dimension(0:,0:,0:)                :: kappa   ! curvature
     real(rp), intent(inout), dimension(0:,0:,0:)                :: d_thinc
+    integer , intent(in   )                                     :: dummy
     ! IBM variables
 #if defined(_USE_IBM)
-    real(rp), intent(in), dimension(1-nh_v:,1-nh_v:,1-nh_v:) :: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
-    integer,  dimension(1-nh_v:,1-nh_v:,1-nh_v:), intent(in):: i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
-    real(rp), dimension(1-nh_v:,1-nh_v:,1-nh_v:,1:), intent(in):: WP1,WP2
+    real(rp), intent(in), dimension(1-nh_v:,1-nh_v:,1-nh_v:)    :: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
+    integer,  dimension(1-nh_v:,1-nh_v:,1-nh_v:),    intent(in) :: i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
+    real(rp), dimension(1-nh_v:,1-nh_v:,1-nh_v:,1:), intent(in) :: WP1,WP2
 #endif
     !
     real(rp) :: dli1, dli2, dli3
     integer :: i,j,k,im,jm,km
     integer :: n1, n2, n3
-    !@cuf attributes(managed) :: nor, cur, kappa, d_thinc, vof, ug, vg, wg, dzc, dzf, zc
+    logical, save :: first_time = .true.
+    !@cuf integer :: istat
+    !@cuf attributes(managed) :: nor, cur, kappa, d_thinc, vof, ug, vg, wg, dzc, dzf, zc, zf
 #if defined(_USE_IBM)
     !@cuf attributes(managed) :: nabs_surf,nx_surf,ny_surf,nz_surf,deltan
     !@cuf attributes(managed) :: i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2
 #endif
     !
-    ! we allocate dvof1, dvof2 and flux only once
+    ! Allocate dvof1, dvof2 and flux only once
     !
-    if(.not.allocated(dvof1)) allocate(dvof1(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v))
-    if(.not.allocated(dvof2)) allocate(dvof2(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v))
-    if(.not.allocated(dvof3)) allocate(dvof3(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v))
-    if(.not.allocated(flux )) allocate(flux (0:n(1)+0,0:n(2)+0,0:n(3)+0))
+    if(.not.allocated(dvof1)) then 
+     allocate(dvof1(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v))
+     !@cuf istat = cudaMemAdvise(dvof1, size(dvof1), cudaMemAdviseSetPreferredLocation, mydev)
+     !@cuf istat = cudaMemPrefetchAsync(dvof1, size(dvof1), mydev, 0)
+    endif
+    if(.not.allocated(dvof2)) then
+     allocate(dvof2(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v))
+     !@cuf istat = cudaMemAdvise(dvof2, size(dvof2), cudaMemAdviseSetPreferredLocation, mydev)
+     !@cuf istat = cudaMemPrefetchAsync(dvof2, size(dvof2), mydev, 0)
+    endif
+    if(.not.allocated(flux )) then
+     allocate(flux(1-nh_u:n(1)+nh_u,1-nh_u:n(2)+nh_u,1-nh_u:n(3)+nh_u))
+     !@cuf istat = cudaMemAdvise(flux, size(flux), cudaMemAdviseSetPreferredLocation, mydev)
+     !@cuf istat = cudaMemPrefetchAsync(flux,  size(flux), mydev, 0)
+    endif
     !
     dli1 = dli(1)
     dli2 = dli(2)
@@ -100,12 +115,22 @@ module mod_vof
     n2 = n(2)
     n3 = n(3)
     !
-    ! TODO: prefetching
+    ! Set the contact angle before doing the flux calculations for the first time (initial condition).
+    if (first_time) then
+     first_time = .false.
+     call setangle(n,nh_v,nh_b,dl,dli,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan, &
+                   i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+                   WP1,WP2,0,ug,vg,wg,zc,zf,dzc)
+     call clip_vof(n,nh_v,vof)
+     call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,vof)
+     call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,vof,nor,cur,kappa,d_thinc)
+    endif
+    !
     !
     ! flux in x
     !
 #if !defined(_TWOD)
-    call cmpt_vof_flux(n(1), n(2), n(3),dli(1),dt,nh_u,nh_v,vof,nor,cur,d_thinc,1,ug,flux) 
+    call cmpt_vof_flux(n(1), n(2), n(3),dli(1),dt,nh_u,nh_v,vof,nor,cur,d_thinc,1,ug,flux)
 #endif
     !
     !$acc kernels
@@ -128,12 +153,14 @@ module mod_vof
     ! update vof
     !
 #if !defined(_TWOD)
-#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE)
     call clip_vof(n,nh_v,dvof1)
+#if defined(_USE_CONTACTANGLE_DYNAMIC)
     call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof1)
-    call setangle(n,dl,dvof1,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,1,ug,vg,wg,zc,dzc)
-#endif
+    call setangle(n,nh_v,nh_b,dl,dli,dvof1,nabs_surf,nx_surf,ny_surf,nz_surf,deltan, &
+                  i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+                  WP1,WP2,1,ug,vg,wg,zc,zf,dzc)
     call clip_vof(n,nh_v,dvof1)
+#endif
     call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof1)
     call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,dvof1,nor,cur,kappa,d_thinc)
 #endif
@@ -157,12 +184,14 @@ module mod_vof
     !
     ! update vof
     !
-#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE)
     call clip_vof(n,nh_v,dvof2)
+#if defined(_USE_CONTACTANGLE_DYNAMIC)
     call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof2)
-    call setangle(n,dl,dvof2,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,2,ug,vg,wg,zc,dzc)
-#endif
+    call setangle(n,nh_v,nh_b,dl,dli,dvof2,nabs_surf,nx_surf,ny_surf,nz_surf,deltan, &
+                  i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+                  WP1,WP2,2,ug,vg,wg,zc,zf,dzc)
     call clip_vof(n,nh_v,dvof2)
+#endif
     call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof2)
     call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,dvof2,nor,cur,kappa,d_thinc)
     !
@@ -176,7 +205,7 @@ module mod_vof
         do i=1,n1
           km = k-1
           !
-          dvof3(i,j,k) = (dvof2(i,j,k)-(flux(i,j,k)-flux(i,j,km))*dli3)/(1.0_rp-dt*dli3*(wg(i,j,k)-wg(i,j,km)))
+          vof(i,j,k) = (dvof2(i,j,k)-(flux(i,j,k)-flux(i,j,km))*dli3)/(1.0_rp-dt*dli3*(wg(i,j,k)-wg(i,j,km)))
           !
         enddo
       enddo
@@ -185,14 +214,16 @@ module mod_vof
     !
     ! update vof
     !
-#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE)
-    call clip_vof(n,nh_v,dvof3)
-    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof3)
-    call setangle(n,dl,dvof3,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,3,ug,vg,wg,zc,dzc)
+    call clip_vof(n,nh_v,vof)
+#if defined(_USE_CONTACTANGLE_DYNAMIC)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,vof)
+    call setangle(n,nh_v,nh_b,dl,dli,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan, &
+                  i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+                  WP1,WP2,3,ug,vg,wg,zc,zf,dzc)
+    call clip_vof(n,nh_v,vof)
 #endif
-    call clip_vof(n,nh_v,dvof3)
-    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,dvof3) ! it can be skipped
-    call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,dvof3,nor,cur,kappa,d_thinc) ! it can be skipped
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,vof)
+    call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,vof,nor,cur,kappa,d_thinc)
     !
     ! divergence correction step
     !
@@ -204,9 +235,9 @@ module mod_vof
           jm = j-1
           im = i-1
           !
-          vof(i,j,k) = dvof3(i,j,k) - dt*( dvof1(i,j,k)*dli1*(ug(i,j,k)-ug(im,j,k)) + &
-                                           dvof2(i,j,k)*dli2*(vg(i,j,k)-vg(i,jm,k)) + &
-                                           dvof3(i,j,k)*dli3*(wg(i,j,k)-wg(i,j,km)) )
+          vof(i,j,k) = vof(i,j,k) - dt*( dvof1(i,j,k)*dli1*(ug(i,j,k)-ug(im,j,k)) + &
+                                         dvof2(i,j,k)*dli2*(vg(i,j,k)-vg(i,jm,k)) + &
+                                           vof(i,j,k)*dli3*(wg(i,j,k)-wg(i,j,km))    )
           !
         enddo
       enddo
@@ -215,19 +246,17 @@ module mod_vof
     !
     ! update vof
     !
-#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE)
-    ! call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,vof)
-    ! call setangle(n,dl,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,1,ug,vg,wg,zc,dzc)
-    ! call clip_vof(n,vof)
-    ! call setangle(n,dl,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,2,ug,vg,wg,zc,dzc)
-    ! call clip_vof(n,vof)
-    ! call setangle(n,dl,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2,WP1,WP2,3,ug,vg,wg,zc,dzc)
-#endif
     call clip_vof(n,nh_v,vof)
+#if !defined(_USE_CONTACTANGLE_DYNAMIC)
+    call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,vof)
+    call setangle(n,nh_v,nh_b,dl,dli,vof,nabs_surf,nx_surf,ny_surf,nz_surf,deltan, & ! The static contact angle only needs to be applied once,
+                  i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &                             ! after advection has taken place.
+                  WP1,WP2,0,ug,vg,wg,zc,zf,dzc)
+    call clip_vof(n,nh_v,vof)
+#endif
     call boundp(cbcvof,n,bcvof,nh_d,nh_v,halo_v,dl,dzc,dzf,vof)
     call update_vof(n,dli,nh_d,dzc,dzf,nh_u,nh_v,halo_p,vof,nor,cur,kappa,d_thinc)
     !
-    return
   end subroutine advvof
   !
   subroutine update_vof(n,dli,nh_d,dzc,dzf,nh_p,nh_v,halo_p,vof,nor,cur,kappa,d_thinc)
@@ -273,7 +302,6 @@ module mod_vof
     call cmpt_d_thinc(n1, n2, n3,nh_v,nor,cur,vof,d_thinc)
     call boundp(cbcvof,n,bcvof,nh_d,nh_p,halo_p,dl,dzc,dzf,d_thinc)
     !
-    return
   end subroutine update_vof
   !
   subroutine update_property(n,nh_v,prop12,vof,prop)
@@ -297,7 +325,7 @@ module mod_vof
     prop12_1 = prop12(1)
     prop12_2 = prop12(2)
     !
-    !$acc parallel loop collapse(3)
+    !$acc kernels
     do k=1,n3
       do j=1,n2
         do i=1,n1
@@ -305,9 +333,8 @@ module mod_vof
         enddo
       enddo
     enddo
-    !$acc end parallel loop 
+    !$acc end kernels 
     !
-    return
   end subroutine update_property
   !
   subroutine update_property_harmonic(n,nh_v,prop12,vof,prop)
@@ -322,15 +349,16 @@ module mod_vof
     integer  :: i,j,k
     integer  :: n1, n2, n3
     real(rp) :: inv1, inv2
+    !@cuf attributes(managed) :: vof
     ! 
     n1 = n(1)
     n2 = n(2)
     n3 = n(3)
     !
-    inv1 = 1.0_rp/(prop12(1) + small)
-    inv2 = 1.0_rp/(prop12(2) + small)
+    inv1 = prop12(1)**(-1)
+    inv2 = prop12(2)**(-1)
     !
-    !$acc parallel loop collapse(3)
+    !$acc kernels
     do k=1,n3
       do j=1,n2
         do i=1,n1
@@ -338,10 +366,48 @@ module mod_vof
         enddo
       enddo
     enddo
-    !$acc end parallel loop
+    !$acc end kernels
     !
-    return
   end subroutine update_property_harmonic
+  !
+  subroutine update_visc_harmonic(n,nh_v,prop12,prop23,rho,vof,prop)
+    implicit none
+    !
+    ! Calculation of local dynamic viscosity using harmonically-averaged kinematic viscosity
+    ! (see Prosperetti, A., 2002. Navier-stokes numerical algorithms for free-surface flow computations: An overview)
+    !
+    integer , intent(in ), dimension(3)        :: n
+    real(rp), intent(in ), dimension(2)        :: prop12,prop23
+    integer , intent(in )                      :: nh_v
+    real(rp), intent(in ), dimension(0:,0:,0:) :: rho
+    real(rp), intent(in ), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
+    real(rp), intent(out), dimension(0:,0:,0:) :: prop
+    real(rp), dimension(1:n(1),1:n(2),1:n(3))  :: invnu
+    integer  :: i,j,k
+    integer  :: n1, n2, n3
+    real(rp) :: invnu1, invnu2
+    !@cuf attributes(managed) :: vof,rho
+    ! 
+    n1 = n(1)
+    n2 = n(2)
+    n3 = n(3)
+    !
+    invnu1 = prop12(1)/prop23(1)
+    invnu2 = prop12(2)/prop23(2)
+    !
+    !$acc kernels
+    do k=1,n3
+      do j=1,n2
+        do i=1,n1
+          invnu(i,j,k) = vof(i,j,k)*invnu1 + (1.0_rp - vof(i,j,k))*invnu2
+          prop(i,j,k)  = rho(i,j,k)/invnu(i,j,k)
+        enddo
+      enddo
+    enddo
+    !$acc end kernels
+    !
+  end subroutine update_visc_harmonic
+  !
   !
   !
   subroutine clip_vof(n,nh_v,vof)
@@ -351,9 +417,9 @@ module mod_vof
     integer , intent(in   ), dimension(3)                       :: n
     integer , intent(in )                                       :: nh_v
     real(rp), intent(inout), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
-    !
     integer :: i,j,k
     integer :: n1, n2, n3
+    !@cuf attributes(managed) :: vof
     !
     n1 = n(1)
     n2 = n(2)
@@ -369,7 +435,6 @@ module mod_vof
     enddo
     !$acc end parallel loop  
     !
-    return
   end subroutine clip_vof
   !
   subroutine cmpt_nor_curv_1o(n1,n2,n3,nh_v,dli,vof,nor,cur,kappa)
@@ -466,7 +531,6 @@ module mod_vof
     enddo
     !$acc end kernels
     !
-    return
   end subroutine cmpt_nor_curv_1o
   !
 #if defined(_FAST_KERNELS_2) 
@@ -626,7 +690,6 @@ module mod_vof
     enddo
     !$acc end parallel loop
     !
-    return
   end subroutine cmpt_nor_curv_2o
   !
 #else
@@ -818,7 +881,6 @@ module mod_vof
     enddo
     !$acc end parallel loop
     !
-    return
   end subroutine cmpt_nor_curv_2o
 #endif
   !
@@ -1075,7 +1137,6 @@ module mod_vof
     enddo
     !$acc end parallel loop 
     !
-    return
   end subroutine cmpt_d_thinc
   !
 #else
@@ -1218,7 +1279,6 @@ module mod_vof
     enddo
     !$acc end parallel loop 
     !
-    return
   end subroutine cmpt_d_thinc
 #endif
   !
@@ -1236,7 +1296,7 @@ module mod_vof
     real(rp), intent(in ), dimension(0:,0:,0:   )             :: d_thinc
     integer , intent(in )                                     :: dir
     real(rp), intent(in ), dimension(1-nh_u:,1-nh_u:,1-nh_u:) :: vel
-    real(rp), intent(out), dimension(     0:,     0:,     0:) :: flux
+    real(rp), intent(out), dimension(1-nh_u:,1-nh_u:,1-nh_u:) :: flux
     !
 !    real(rp), dimension(3)   :: nor_v,cv
     real(rp) :: nor_v1, nor_v2, nor_v3
@@ -1536,7 +1596,6 @@ module mod_vof
     enddo
     !$acc end parallel loop
     !
-    return
   end subroutine cmpt_vof_flux
   !
 #else
@@ -1789,7 +1848,6 @@ module mod_vof
     enddo
     !$acc end parallel loop
     !
-    return
   end subroutine cmpt_vof_flux
 #endif
   !
@@ -1857,7 +1915,6 @@ module mod_vof
     arg = ((aa-cc)**2-4._rp*(bb-dd))
     x = 0.5_rp*(-(aa-cc) + sqrt(arg))
     !
-    return
   end subroutine solve_quar_paper
   !
   subroutine solve_quad(a0,a1,a2,x)
@@ -1876,7 +1933,6 @@ module mod_vof
     x2 = 0.5_rp*(-a1-sqrt(a1**2-4.0_rp*a2*a0))/a2
     x  = max(x1,x2)
     !
-    return
   end subroutine solve_quad
   !
   ! code devoted to the VoF initialization
@@ -1895,9 +1951,10 @@ module mod_vof
   end interface
 #endif
   !
-  subroutine initvof(n,nh_v,dli,vof)
+  subroutine initvof(n,nh_v,nh_d,dl,dli,z_c,z_f,dzc,dzf,vof)
     !
-    use mod_param     , only: inivof,lx,ly,lz,cbcvof,xc,yc,zc,r,nbub, &
+    use mod_param     , only: inivof,lx,ly,lz,cbcvof,xc,yc,zc,r, &
+                              xc_bub,yc_bub,zc_bub,r_bub,nbub, &
 #if defined(_USE_IBM)
                               xc_ibm, yc_ibm, zc_ibm, r_ibm, zmax_ibm, zmin_ibm, &
 #endif
@@ -1910,8 +1967,9 @@ module mod_vof
     implicit none
     !
     integer , intent(in ), dimension(3)        :: n
-    integer , intent(in )                      :: nh_v
-    real(rp), intent(in ), dimension(3)        :: dli
+    integer , intent(in )                      :: nh_v,nh_d
+    real(rp), intent(in ), dimension(3)        :: dl,dli
+    real(rp), intent(in ), dimension(1-nh_d:)                 :: z_c,z_f,dzc,dzf
     real(rp), intent(out), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v) :: vof
     !
     integer  :: i,j,k,q,ii,jj,kk, i_b
@@ -1923,7 +1981,7 @@ module mod_vof
     real(rp) :: r2,c1,c2,p,h
     integer  :: nbox
     real(rp) :: eps,epsbox
-    real(rp), dimension(3) :: dl,dlbox
+    real(rp), dimension(3) :: dlbox
     integer , dimension(3) :: iperiod
     real(rp) :: grid_vol_ratio
     integer , dimension(2):: nx_b, ny_b, nz_b
@@ -1931,9 +1989,12 @@ module mod_vof
     real(rp):: sign_v
     !@cuf attributes(managed) :: vof
     !
+#if defined(_OPENACC)
     nbox = 100
-    dl(:) = dli(:)**(-1)
-    dlbox(:) = dl(:)/(1.0_rp*nbox)
+#else
+    nbox = 50
+#endif
+    dlbox(:) = dl(:)/real(nbox,rp)
     !
     n1 = n(1)
     n2 = n(2)
@@ -1965,12 +2026,12 @@ module mod_vof
       ! endif
       !
       do i_b=1,nbub
-        call bub_lim(nx_b,xc(i_b),r(i_b),dl(1),n(1),ijk_start(1))
-        call bub_lim(ny_b,yc(i_b),r(i_b),dl(2),n(2),ijk_start(2))
-        call bub_lim(nz_b,zc(i_b),r(i_b),dl(3),n(3),ijk_start(3))
+        call bub_lim(nx_b,xc_bub(i_b),r_bub(i_b),dl(1),n(1),ijk_start(1))
+        call bub_lim(ny_b,yc_bub(i_b),r_bub(i_b),dl(2),n(2),ijk_start(2))
+        call bub_lim(nz_b,zc_bub(i_b),r_bub(i_b),dl(3),n(3),ijk_start(3))
         !$acc kernels
         do k=nz_b(1),nz_b(2)
-          z = (k+ijk_start(3)-0.5_rp)*dl(3)
+          z = z_c(k)!(k+ijk_start(3)-0.5_rp)*dl(3)
           do j=ny_b(1),ny_b(2)
             y = (j+ijk_start(2)-0.5_rp)*dl(2)
             do i=nx_b(1),nx_b(2)
@@ -1986,12 +2047,12 @@ module mod_vof
                     do ii = -1,1
 #if defined(_TWOD)
                       sdist = sqrt(  &
-                                    (y+jj*iperiod(2)*ly-yc(i_b))**2 + &
-                                    (z+kk*iperiod(3)*lz-zc(i_b))**2 ) - r(i_b)
+                                    (y+jj*iperiod(2)*ly-yc_bub(i_b))**2 + &
+                                    (z+kk*iperiod(3)*lz-zc_bub(i_b))**2 ) - r_bub(i_b)
 #else    
-                      sdist = sqrt( (x+ii*iperiod(1)*lx-xc(i_b))**2 + &
-                                    (y+jj*iperiod(2)*ly-yc(i_b))**2 + &
-                                    (z+kk*iperiod(3)*lz-zc(i_b))**2 ) - r(i_b)
+                      sdist = sqrt( (x+ii*iperiod(1)*lx-xc_bub(i_b))**2 + &
+                                    (y+jj*iperiod(2)*ly-yc_bub(i_b))**2 + &
+                                    (z+kk*iperiod(3)*lz-zc_bub(i_b))**2 ) - r_bub(i_b)
 #endif
                         if(abs(sdist).lt.sdistmin) sdistmin = sdist
                     enddo
@@ -2014,16 +2075,16 @@ module mod_vof
                       do ii=1,nbox
                         xx = xl + (ii-0.5_rp)*dlbox(1)
 #if defined(_TWOD)
-                        sdist = sqrt(                  (yy-yc(i_b))**2 + (zz-zc(i_b))**2) - r(i_b)
+                        sdist = sqrt(                  (yy-yc_bub(i_b))**2 + (zz-zc_bub(i_b))**2) - r_bub(i_b)
 #else
-                        sdist = sqrt((xx-xc(i_b))**2 + (yy-yc(i_b))**2 + (zz-zc(i_b))**2) - r(i_b)
+                        sdist = sqrt((xx-xc_bub(i_b))**2 + (yy-yc_bub(i_b))**2 + (zz-zc_bub(i_b))**2) - r_bub(i_b)
 #endif
                         if(sdist.lt.-epsbox) vof(i,j,k) = vof(i,j,k) + grid_vol_ratio
                       enddo
                     enddo
                   enddo
 #else
-                  call init_MTHINC(xc(i_b), yc(i_b), zc(i_b), r(i_b), &
+                  call init_MTHINC(xc_bub(i_b), yc_bub(i_b), zc_bub(i_b), r_bub(i_b), &
                     (/x-dl(1)*0.5_rp, y-dl(2)*0.5_rp, z-dl(3)*0.5_rp/), &
                     (/x+dl(1)*0.5_rp, y+dl(2)*0.5_rp, z+dl(3)*0.5_rp/), & 
                     dl(1), beta_thinc, vof(i,j,k))
@@ -2070,7 +2131,7 @@ module mod_vof
       zfilm_top = lz/2._rp+dfilm/2._rp
       zfilm_bot = lz/2._rp-dfilm/2._rp
       do k=1,n3
-        z = (k-0.5_rp)*dl(3)
+        z = z_c(k)!(k-0.5_rp)*dl(3)
         do j=1,n2
           do i=1,n1
             sdist1 =  (z - zfilm_top)
@@ -2169,8 +2230,8 @@ module mod_vof
       zfilm_bot = lz/2.0_rp
       !$acc kernels
       do k=1,n3
-        kk = ijk_start(3) + k
-        z = (kk-0.5_rp)*dl(3)
+        !kk = ijk_start(3) + k
+        z = z_c(k)!(kk-0.5_rp)*dl(3)
         do j=1,n2
           do i=1,n1
             sdist1 =  (z - zfilm_bot)
@@ -2269,8 +2330,8 @@ module mod_vof
       do k=1,n3
         do j=1,n2
           do i=1,n1
-            kk = ijk_start(3) + k
-            z  = (kk-0.5)*dl(3)
+            !kk = ijk_start(3) + k
+            z  = z_c(k)!(kk-0.5)*dl(3)
             !
             if(    z.gt.(zfilm_bot+0.05_rp*lz))  then
               vof(i,j,k) = (1._rp+1._rp*sign_v)/2._rp
@@ -2302,7 +2363,7 @@ module mod_vof
       cyl_rad = lx/4.0
       !$acc kernels
       do k=1,n3
-       z = (k+ijk_start(3)-0.5_rp)*dl(3)
+       z = z_c(k)!(k+ijk_start(3)-0.5_rp)*dl(3)
         do j=1,n2
          y = (j+ijk_start(2)-0.5_rp)*dl(2)
           do i=1,n1
@@ -2338,52 +2399,39 @@ module mod_vof
       !$acc end kernels
 #if defined(_USE_IBM)
     case('corner')
-      eps    = dl(3)
-      epsbox = dlbox(3)
-      grid_vol_ratio = product(dlbox(:))/product(dl(:))
       cyl_x = xc_ibm
       cyl_y = yc_ibm
-      r2 = r_ibm + r(1)
-      c1 = (r2/(r2**2 - 1.0_rp))*(tand(theta1) - r2*tand(theta2)**-1)
-      c2 = (r2/(2.0_rp*(r2**2 - 1.0_rp)))*(2.0_rp*log(r2)*(r2*tand(theta2)**-1-tand(theta1))+r2*(r2*tand(theta1)-tand(theta2)**-1))
-      p  = 2.0_rp*(r2*tand(theta1)-tand(theta2)**-1)/(r2**2-1.0_rp)
+      r2 = r_ibm + r
+      c1 = (r2/(r2**2 - 1.0_rp))*(tand(theta1) - r2*(cosd(theta2)/sind(theta2)))
+      c2 = (r2/(2.0_rp*(r2**2 - 1.0_rp)))*&
+           (2.0_rp*log(r2)*(r2*(cosd(theta2)/sind(theta2))-tand(theta1))+r2*(r2*tand(theta1)-(cosd(theta2)/sind(theta2))))
+      p  = 2.0_rp*(r2*tand(theta1)-(cosd(theta2)/sind(theta2)))/(r2**2 - 1.0_rp)
       !$acc kernels
       do k=1,n3
-       z = (k+ijk_start(3)-0.5_rp)*dl(3)
+       z = z_c(k)
+       ! eps = dzc(k)
+       ! epsbox = eps/real(nbox,rp)
+       ! dlbox(3) = dzc(k)/real(nbox,rp)
+       ! grid_vol_ratio = product(dlbox(:))/(dl(1)*dl(2)*dzc(k))
         do j=1,n2
          y = (j+ijk_start(2)-0.5_rp)*dl(2)
           do i=1,n1
-          x = (i+ijk_start(1)-0.5_rp)*dl(1)
+           x = (i+ijk_start(1)-0.5_rp)*dl(1)
             !
-            ! do jj = -1,1
-              ! do ii = -1,1
-               ! h = -p*((x+ii*iperiod(1)*lx-cyl_x)**2 + (y+jj*iperiod(2)*ly-cyl_y)**2)*0.25_rp  + &
-                   ! c1*log(sqrt((x+ii*iperiod(1)*lx-cyl_x)**2 + (y+jj*iperiod(2)*ly-cyl_y)**2)) + &
-                   ! c2
-               ! if(z.le.h) vof(i,j,k) = 1._rp
-               ! if((z - h).lt.-eps) then
-                 ! vof(i,j,k) = 1._rp
-               ! elseif((z - h).gt.eps) then
-                 ! vof(i,j,k) = 0._rp
-               ! endif
-              ! enddo
-            ! enddo
-               h = -p*((x-cyl_x)**2 + (y-cyl_y)**2)*0.25_rp  + &
-                   c1*log(sqrt((x-cyl_x)**2 + (y-cyl_y)**2)) + &
-                   c2
-               if( z.le.(h+zmin_ibm) ) vof(i,j,k) = 1.0_rp
+            h = zmin_ibm - p*((x-cyl_x)**2 + (y-cyl_y)**2)*0.25_rp + &
+                c1*log(sqrt((x-cyl_x)**2 + (y-cyl_y)**2)) + c2
+            if(z.le.h) vof(i,j,k) = 1.0_rp
             !
-            ! yl = y-dl(2)/2._rp
-            ! xl = x-dl(1)/2._rp
-            ! do jj=1,nbox
-              ! yy = yl + (jj-0.5)*dlbox(2)
-              ! do ii=1,nbox
-                ! xx = xl + (ii-0.5)*dlbox(1)
-                ! h = -p*((xx+ii*iperiod(1)*lx-cyl_x)**2 + (yy+jj*iperiod(2)*ly-cyl_y)**2)*0.25_rp + &
-                    ! c1*log(((xx+ii*iperiod(1)*lx-cyl_x)**2 + (yy+jj*iperiod(2)*ly-cyl_y)**2)) + &
-                    ! c2
-                ! if(z.lt.h) vof(i,j,k) = vof(i,j,k) + grid_vol_ratio
-                ! if((z - h).lt.-epsbox) vof(i,j,k) = vof(i,j,k) + grid_vol_ratio
+            ! yl = y-0.5_rp*dl(2)
+            ! xl = x-0.5_rp*dl(1)
+             ! do jj=1,nbox
+               ! yy = yl + real((jj-1),rp)*dlbox(2)
+               ! do ii=1,nbox
+                 ! xx = xl + real((ii-1),rp)*dlbox(1)
+                 ! h = -p*((xx-cyl_x)**2 + (yy-cyl_y)**2)*0.25_rp  + &
+                     ! c1*log(sqrt((xx-cyl_x)**2 + (yy-cyl_y)**2)) + &
+                     ! c2
+                 ! if(z.le.(h + zmin_ibm)) vof(i,j,k) = vof(i,j,k) + grid_vol_ratio
               ! enddo
             ! enddo
             !
@@ -2395,7 +2443,7 @@ module mod_vof
     case default  
       call flutas_error('Error: invalid name of the initial VoF field. Simulation aborted. Check vof.in')
     end select
-    return
+    !
   end subroutine initvof
   !
   subroutine bub_lim(nx_b,xc,r,dx,n,ijk_start)
@@ -2426,7 +2474,6 @@ module mod_vof
       nx_b(2) = ub-ijk_start 
     endif
     !
-    return
   end subroutine bub_lim
   !
 end module mod_vof

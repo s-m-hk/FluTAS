@@ -29,7 +29,7 @@ module mod_post
   contains
   !
 #if defined(_HEAT_TRANSFER)
-  subroutine wall_avg(idir,nx,ny,nz,ngx,ngy,ngz,dxi,dyi,dzi,nh_t,ka,tmp,time)
+  subroutine wall_avg(ng,dims,n,idir,nx,ny,nz,ngx,ngy,ngz,dxi,dyi,dzi,nh_t,ka,tmp,time)
     !
     ! note: --> to be generalized for non-uniform grid along z (streched grid)
     !
@@ -42,6 +42,7 @@ module mod_post
     !
     implicit none
     !
+    integer , intent(in), dimension(3)                         :: n,ng,dims
     integer , intent(in )                                      :: idir
     integer , intent(in )                                      :: nx,ny,nz
     integer , intent(in )                                      :: ngx,ngy,ngz

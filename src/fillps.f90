@@ -65,7 +65,6 @@ module mod_fillps
     !$OMP END PARALLEL DO
 #endif
     !
-    return
   end subroutine fillps
   !
 end module mod_fillps

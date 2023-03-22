@@ -7,6 +7,7 @@ module mod_chkdiv
   use mod_common_mpi, only: myid,ierr
   use mod_types
   !@cuf use cudafor
+  !@cuf use mod_common_mpi, only: mydev
   !
   implicit none
   !
@@ -27,10 +28,10 @@ module mod_chkdiv
     real(rp), intent(in ), dimension(1-nh_d:)                 :: dzfi
     real(rp), intent(in ), dimension(1-nh_u:,1-nh_u:,1-nh_u:) :: u,v,w
     real(rp), intent(out)                                     :: divtot,divmax
-    !
     real(rp) :: div
-    !@cuf attributes(managed) :: u,v,w,dzfi
     integer :: i,j,k
+    !@cuf integer :: istat
+    !@cuf attributes(managed) :: u,v,w,dzfi
     !
     divtot = 0._rp
     divmax = 0._rp
@@ -61,11 +62,11 @@ module mod_chkdiv
 #else
     !$OMP END PARALLEL DO
 #endif
+    !@cuf istat=cudaDeviceSynchronize()
     call mpi_allreduce(MPI_IN_PLACE,divtot,1,MPI_REAL_RP,MPI_SUM,MPI_COMM_WORLD,ierr)
     call mpi_allreduce(MPI_IN_PLACE,divmax,1,MPI_REAL_RP,MPI_MAX,MPI_COMM_WORLD,ierr)
     if(myid.eq.0) print*, 'Total divergence = ', divtot, '| Maximum divergence = ', divmax
     !
-    return
   end subroutine chkdiv
   !
 end module mod_chkdiv

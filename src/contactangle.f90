@@ -1,10 +1,9 @@
 module mod_contactangle
-#if defined(_USE_IBM)
-use mod_param, only: mu1, mu2, sigma
+#if defined(_USE_IBM) && defined(_USE_CONTACTANGLE_DYNAMIC)
+use mod_param, only: mu1, mu2, sigma, pi
 use mod_types
 
 implicit none
-real(rp), parameter :: pi = acos(-1._rp)
 real(rp), parameter :: gridCorrectionK = 1.0e-9_rp
 private
 public getTheta
@@ -15,6 +14,7 @@ contains
 !
 subroutine getTheta(thetaIn, Delta, thetaOut, velInterf)
   implicit none
+  !$acc routine(getTheta) seq
   real(rp), intent(in) :: thetaIn, Delta, velInterf
   real(rp), intent(out) :: thetaOut
   real(rp) :: Ca, NSconst
@@ -53,12 +53,11 @@ subroutine NewtonSolver(F, Fp, x0, Const, xVar) !Numerical solver using Newton's
 !   x0: the initial guess
 ! Returns:
 !   the estimate x satisfying F(x) = Const (assumes Newton converged!)
-
 implicit none
+!$acc routine(NewtonSolver) seq
 real(rp), intent(in) :: x0, Const
 real(rp), external :: F, Fp
 real(rp), intent(out) :: xVar
-
 real(rp) :: deltax, fx, fxprime, iter, tol = 1.0e-5_rp
 integer :: k, maxiter = 20
 
@@ -67,6 +66,7 @@ integer :: k, maxiter = 20
 xVar = x0
 
 ! Newton iteration to find a zero of f(x)
+!$acc loop seq
 do k = 1,maxiter
 
     ! Calculate function and its derivative:
@@ -84,6 +84,7 @@ do k = 1,maxiter
     ! Update x:
     xVar = xVar - deltax
   enddo
+!$acc end loop
 
 if (k .ge. maxiter) then
     ! Might not have converged
@@ -100,8 +101,8 @@ end subroutine NewtonSolver
 real(rp) function fStarInv(phi)
   implicit none
   real(rp), intent(in) :: phi
-
   real(rp) :: sqrtq, sin2phi,q
+
   if (phi == 0.0_rp) then
     fStarInv = 0.0_rp
     return
@@ -118,11 +119,9 @@ end function fStarInv
 real(rp) function gStar(theta)
   ! Approximation of the definite integral of fStarInv with the
   ! composite trapezoidal rule, using n subintervals
-  ! See http://en.wikipedia.org/wiki/Trapezoid_rule
-
   implicit none
-  real(rp), intent(in) :: theta
 
+  real(rp), intent(in) :: theta
   ! [a, b] : the interval of integration
   real(rp) :: a = 0.0_rp, b
   real(rp) :: summation, invN

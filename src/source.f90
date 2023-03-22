@@ -3,11 +3,13 @@
 !
 module mod_source
   !
+  use mpi
   use mod_types
   use mod_common_mpi, only: myid,ierr,ijk_start
   use mod_sanity    , only: flutas_error
   !
   implicit none
+  real(rp), parameter :: small = 10._rp**(-16)
   !
   private
   public :: bulk_forcing_src
@@ -26,7 +28,7 @@ module mod_source
 #if defined(_USE_VOF)
   subroutine surft_src(nx,ny,nz,nh_d,nh_u,nh_v,f_t12,dxi,dyi,dzi,dzci,kappa,psi,rho,u,v,w)
     !
-    use mod_param, only: sigma,small
+    use mod_param, only: sigma
     !
     implicit none 
     !
@@ -38,8 +40,7 @@ module mod_source
     real(rp), intent(in   ), dimension(0:,0:,0:)                :: kappa,rho
     real(rp), intent(in   ), dimension(1-nh_v:,1-nh_v:,1-nh_v:) :: psi
     real(rp), intent(inout), dimension(1-nh_u:,1-nh_u:,1-nh_u:) :: u,v,w
-    !
-    real(rp) :: wi,wip,ti,tip,wj,wjp,tj,tjp,wk,wkp,tk,tkp
+    real(rp) :: wi,wip,wj,wjp,wk,wkp
     real(rp) :: kappax,kappay,kappaz
     real(rp) :: rhox,rhoy,rhoz
     integer  :: i,j,k,ip,jp,kp
@@ -58,21 +59,24 @@ module mod_source
           rhoy   = 0.5_rp*(rho(i,jp,k)+rho(i,j,k))
           rhoz   = 0.5_rp*(rho(i,j,kp)+rho(i,j,k))
           !
-          ti  = max(1.0_rp - psi(i ,j,k), small)
-          tj  = ti
-          tk  = tj
-          tip = max(1.0_rp - psi(ip,j,k), small)
-          tjp = max(1.0_rp - psi(i,jp,k), small)
-          tkp = max(1.0_rp - psi(i,j,kp), small)
-          wi  = sqrt(psi(i ,j,k)*ti )
-          wip = sqrt(psi(ip,j,k)*tip)
-          wj  = sqrt(psi(i,j ,k)*tj )
-          wjp = sqrt(psi(i,jp,k)*tjp)
-          wk  = sqrt(psi(i,j,k )*tk )
-          wkp = sqrt(psi(i,j,kp)*tkp)
-          kappax = (wi*kappa(i,j,k) + wip*kappa(ip,j,k))/max(wi + wip, small)
-          kappay = (wj*kappa(i,j,k) + wjp*kappa(i,jp,k))/max(wj + wjp, small)
-          kappaz = (wk*kappa(i,j,k) + wkp*kappa(i,j,kp))/max(wk + wkp, small)
+          ! VoF-weighted interpolation of curvature onto cell faces for more accurate surface tension force calculations
+          !
+          wi  = sqrt(psi(i ,j,k)*(1.0_rp - psi(i ,j,k)) + small)
+          wip = sqrt(psi(ip,j,k)*(1.0_rp - psi(ip,j,k)) + small)
+          wj  = sqrt(psi(i,j ,k)*(1.0_rp - psi(i ,j,k)) + small)
+          wjp = sqrt(psi(i,jp,k)*(1.0_rp - psi(i,jp,k)) + small)
+          wk  = sqrt(psi(i,j,k )*(1.0_rp - psi(i ,j,k)) + small)
+          wkp = sqrt(psi(i,j,kp)*(1.0_rp - psi(i,j,kp)) + small)
+          !
+          kappax = (sqrt(psi(i ,j,k)*(1.0_rp - psi(i ,j,k)))*kappa(i ,j,k) + &
+                    sqrt(psi(ip,j,k)*(1.0_rp - psi(ip,j,k)))*kappa(ip,j,k))/(wi + wip)
+          !
+          kappay = (sqrt(psi(i,j ,k)*(1.0_rp - psi(i,j ,k)))*kappa(i,j ,k) + & 
+                    sqrt(psi(i,jp,k)*(1.0_rp - psi(i,jp,k)))*kappa(i,jp,k))/(wj + wjp)
+          !
+          kappaz = (sqrt(psi(i,j,k )*(1.0_rp - psi(i,j,k )))*kappa(i,j,k ) + &
+                    sqrt(psi(i,j,kp)*(1.0_rp - psi(i,j,kp)))*kappa(i,j,kp))/(wk + wkp)
+          !
           ! kappax = 0.5_rp*(kappa(ip,j,k)+kappa(i,j,k))
           ! kappay = 0.5_rp*(kappa(i,jp,k)+kappa(i,j,k))
           ! kappaz = 0.5_rp*(kappa(i,j,kp)+kappa(i,j,k))
@@ -86,7 +90,6 @@ module mod_source
     enddo
     !$acc end kernels
     !
-    return
   end subroutine surft_src
 #endif
   !
@@ -190,7 +193,6 @@ module mod_source
     enddo
     !$acc end kernels
     !
-    return
   end subroutine grav_tw_src
 #else
   subroutine grav_sp_src(nx,ny,nz,f_t12,cbcpre,dxi,dyi,dzi,nh_d,dzfi, &
@@ -257,7 +259,6 @@ module mod_source
     enddo
     !$acc end kernels
     !
-    return
   end subroutine grav_sp_src
 #endif
   !
@@ -323,7 +324,6 @@ module mod_source
     enddo
     !$acc end kernels
     !
-    return
   end subroutine pres_tw_src
 #else
   subroutine pres_sp_src(nx,ny,nz,f_t12,dxi,dyi,dzi,nh_d,nh_u,dzci,rho0i,pold,u,v,w)
@@ -360,7 +360,6 @@ module mod_source
     enddo
     !$acc end kernels
     !
-    return
   end subroutine pres_sp_src
 #endif
   !
@@ -432,7 +431,6 @@ module mod_source
       call flutas_error('Invalid forcing for HIT - check forcing.in')
     end select
     !
-    return
   end subroutine forc_src
 #endif
   !
@@ -575,7 +573,6 @@ module mod_source
       call flutas_error('Invalid selected control strategy - check dns.in')
     end select
     !
-    return
   end subroutine bulk_forcing_src
   !
 end module mod_source

@@ -295,7 +295,6 @@ module mod_initflow
 #endif
     endif
     ! 
-    return
   end subroutine initflow
   !
 #if defined(_HEAT_TRANSFER)
@@ -380,7 +379,6 @@ module mod_initflow
 #endif
     endif
     !
-    return
   end subroutine inittmp
 #endif   
   !
@@ -435,7 +433,6 @@ module mod_initflow
       enddo
     enddo
     !
-    return
   end subroutine init_surf_tension
 #endif
   ! 
@@ -482,7 +479,6 @@ module mod_initflow
       enddo
     enddo
     !
-    return
   end subroutine add_noise
   !
 #if defined(_OPENACC)
@@ -531,7 +527,6 @@ module mod_initflow
     enddo
     !$acc end parallel
     !
-    return
   end subroutine add_noise_cuda
 #endif
   !
@@ -573,7 +568,6 @@ module mod_initflow
       !$OMP END WORKSHARE
     endif
     !
-    return
   end subroutine set_mean
   !
   subroutine couette(q,n,nh_d,zc,norm,p)
@@ -597,7 +591,6 @@ module mod_initflow
       p(k) = 0.5_rp*(1._rp-2._rp*z)/norm
     enddo
     !
-    return
   end subroutine couette
   !
   subroutine poiseuille(q,n,nh_d,zc,norm,p)
@@ -621,7 +614,6 @@ module mod_initflow
       p(k) = 6._rp*z*(1._rp-z)*norm
     enddo
     !
-    return
   end subroutine poiseuille
   !
   subroutine log_profile(q,n,nh_d,zc,mu_p,rho_p,lref,uref,p)
@@ -646,7 +638,6 @@ module mod_initflow
       p(n+1-k) = p(k)
     enddo
     !
-    return
   end subroutine log_profile
   !
   ! functions to initialize the streamwise vortex pair

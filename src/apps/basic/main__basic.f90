@@ -52,7 +52,7 @@ program flutas
                             nthreadsmax, &
                             gr, &
                             is_outflow,no_outflow,is_forced, &
-                            rho1,rho2,rho0,mu1,mu2,cbcvof,bcvof,late_init,i_late_init, &
+                            rho1,rho2,mu1,mu2,cbcvof,bcvof,late_init,i_late_init, &
                             rho0, &
                             n,ng,l,dl,dli, &
                             bulk_ftype,rkcoeff, &
@@ -707,7 +707,7 @@ program flutas
     call boundp(cbcpre,n,bcpre,nh_d,nh_p,halo_p,dl,dzc,dzf,pold)
     !
 #if defined(_USE_IBM)
-    call Penalization_face(up,vp,wp,cell_u_tag,cell_v_tag,cell_w_tag)
+    call Penalization_face(u,v,w,cell_u_tag,cell_v_tag,cell_w_tag)
 #endif
     !
     call fillps(n(1),n(2),n(3),nh_d,nh_u,dxi,dyi,dzi,dzfi,f_t12_i,rho0,u,v,w,p)
