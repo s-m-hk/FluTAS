@@ -114,17 +114,17 @@ program flutas
   real(rp), dimension(:,:,:,:), allocatable :: nor                   
   real(rp), dimension(:,:,:)  , allocatable :: d_thinc
   !
+#if defined(_USE_IBM)
+  integer, dimension(:,:,:),allocatable   :: Level_set,i_mirror,j_mirror,k_mirror,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
+  real(rp),dimension(:,:,:),allocatable   :: cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag
+  real(rp),dimension(:,:,:),allocatable   :: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
+  real(rp),dimension(:,:,:,:),allocatable :: WP1,WP2
+#endif
+  !
   type(C_PTR), dimension(2,2) :: arrplanp
   real(rp), allocatable, dimension(:,:) :: lambdaxyp
   real(rp), allocatable, dimension(:)   :: ap,bp,cp
   real(rp) :: normfftp
-  !
-#if defined(_USE_IBM)
-  real(rp),dimension(:,:,:),allocatable   :: Level_set,cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag
-  real(rp),dimension(:,:,:),allocatable   :: nx_surf,ny_surf,nz_surf,nabs_surf,deltan
-  integer, dimension(:,:,:),allocatable   :: i_mirror,j_mirror,k_mirror,i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
-  real(rp),dimension(:,:,:,:),allocatable :: WP1,WP2
-#endif
   !
   real(rp), allocatable, dimension(:,:,:) :: rhsbp_x, rhsbp_y, rhsbp_z
   !
@@ -507,6 +507,31 @@ program flutas
     !
   endif
 #if defined(_USE_IBM)
+  !@cuf istat=cudaDeviceSynchronize()
+  call MPI_BARRIER(MPI_COMM_WORLD, ierr)
+  !
+  !@cuf istat = cudaMemPrefetchAsync(cell_u_tag, size(cell_u_tag),     cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(cell_v_tag, size(cell_v_tag),     cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(cell_w_tag, size(cell_w_tag),     cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(Level_set, size(Level_set),       cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nx_surf, size(nx_surf),           cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(ny_surf, size(ny_surf),           cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nz_surf, size(nz_surf),           cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nabs_surf, size(nabs_surf),       cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(deltan, size(deltan),             cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(i_mirror, size(i_mirror),         cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(j_mirror, size(j_mirror),         cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(k_mirror, size(k_mirror),         cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(i_IP1, size(i_IP1),               cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(j_IP1, size(j_IP1),               cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(k_IP1, size(k_IP1),               cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(i_IP2, size(i_IP2),               cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(j_IP2, size(j_IP2),               cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(k_IP2, size(k_IP2),               cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(WP1, size(WP1),                   cudaCpuDeviceId, 0)
+  !@cuf istat = cudaMemPrefetchAsync(WP2, size(WP2),                   cudaCpuDeviceId, 0)
+  !
   call initIBM(dims,n,ng,cell_u_tag,cell_v_tag,cell_w_tag,cell_phi_tag,Level_set, &
                nx_surf,ny_surf,nz_surf,nabs_surf, &
                i_mirror,j_mirror,k_mirror, &
@@ -514,8 +539,30 @@ program flutas
                WP1,WP2,deltan, &
                nh_d,nh_b,halo_b, &
                zc,zf,dzc,dzf,dl,dli)
-
-  !$acc parallel loop collapse(3)
+  !
+  !@cuf istat = cudaMemPrefetchAsync(cell_u_tag, size(cell_u_tag),     mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(cell_v_tag, size(cell_v_tag),     mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(cell_w_tag, size(cell_w_tag),     mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(Level_set, size(Level_set),       mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nx_surf, size(nx_surf),           mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(ny_surf, size(ny_surf),           mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nz_surf, size(nz_surf),           mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(nabs_surf, size(nabs_surf),       mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(deltan, size(deltan),             mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(i_mirror, size(i_mirror),         mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(j_mirror, size(j_mirror),         mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(k_mirror, size(k_mirror),         mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(i_IP1, size(i_IP1),               mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(j_IP1, size(j_IP1),               mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(k_IP1, size(k_IP1),               mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(i_IP2, size(i_IP2),               mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(j_IP2, size(j_IP2),               mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(k_IP2, size(k_IP2),               mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(WP1, size(WP1),                   mydev, 0)
+  !@cuf istat = cudaMemPrefetchAsync(WP2, size(WP2),                   mydev, 0)
+  !
+  !$acc kernels 
   do k=1,n3
     do j=1,n2
       do i=1,n1
@@ -523,7 +570,7 @@ program flutas
       end do
     end do
   end do
-  !$acc end parallel loop 
+  !$acc end kernels
   !
   if(surface_type.eq.'WCyl') then
    do k=1,n3
@@ -586,35 +633,6 @@ program flutas
   ! include 'out1d.h90'
   include 'out2d.h90'
   include 'out3d.h90'
-#if defined(_USE_IBM)
-  !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), cudaCpuDeviceId, 0)
-  !@cuf istat = cudaMemPrefetchAsync(nabs_surf, size(nabs_surf), cudaCpuDeviceId, 0)
-  !@cuf istat = cudaMemPrefetchAsync(nx_surf, size(nx_surf), cudaCpuDeviceId, 0)
-  !@cuf istat = cudaMemPrefetchAsync(ny_surf, size(ny_surf), cudaCpuDeviceId, 0)
-  !@cuf istat = cudaMemPrefetchAsync(nz_surf, size(nz_surf), cudaCpuDeviceId, 0)
-
-  call write_visu_3d(datadir,'sol_fld_'//fldnum//'.bin','log_visu_3d.out','sol', &
-                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
-                     (1.0_rp - cell_phi_tag(1:n(1),1:n(2),1:n(3))))
-  call write_visu_3d(datadir,'nab_fld_'//fldnum//'.bin','log_visu_3d.out','nab', &
-                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
-                     nabs_surf(1:n(1),1:n(2),1:n(3)))
-  call write_visu_3d(datadir,'n_x_fld_'//fldnum//'.bin','log_visu_3d.out','nx', &
-                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
-                     nx_surf(1:n(1),1:n(2),1:n(3)))
-  call write_visu_3d(datadir,'n_y_fld_'//fldnum//'.bin','log_visu_3d.out','ny', &
-                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
-                     ny_surf(1:n(1),1:n(2),1:n(3)))
-  call write_visu_3d(datadir,'n_z_fld_'//fldnum//'.bin','log_visu_3d.out','nz', &
-                     (/1,1,1/),(/ng(1),ng(2),ng(3)/),(/1,1,1/),time,istep, &
-                     nz_surf(1:n(1),1:n(2),1:n(3)))
-
-  !@cuf istat = cudaMemPrefetchAsync(cell_phi_tag, size(cell_phi_tag), mydev, 0)
-  !@cuf istat = cudaMemPrefetchAsync(nabs_surf,    size(cell_phi_tag), mydev, 0)
-  !@cuf istat = cudaMemPrefetchAsync(nx_surf,      size(nx_surf), mydev, 0)
-  !@cuf istat = cudaMemPrefetchAsync(ny_surf,      size(ny_surf), mydev, 0)
-  !@cuf istat = cudaMemPrefetchAsync(nz_surf,      size(nz_surf), mydev, 0)
-#endif
   !
   ! Prefetching post IO
   !@cuf istat = cudaMemPrefetchAsync(u, size(u), mydev, 0)
@@ -975,11 +993,11 @@ program flutas
         call out0d(trim(datadir)//'forcing.out',11,var)
       endif 
 #if defined(_USE_IBM)
-      call Wetting_radius(n,ng,nh_v,nh_b, &
-                          time,nabs_surf,psi,deltan, &
-                          i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
-                          WP1,WP2, &
-                          dzc,dl,dims)
+      ! call Wetting_radius(n,ng,nh_v,nh_b, &
+                          ! time,nabs_surf,psi,deltan, &
+                          ! i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
+                          ! WP1,WP2, &
+                          ! dzc,dl,dims)
 #endif
       !
       call profiler_stop("OUT:iout0d")

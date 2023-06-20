@@ -9,6 +9,7 @@ use mod_param, only: l,cbcpre, &
 use mod_common_mpi, only: myid,ierr,ijk_start
 use mod_types
 !@cuf use cudafor
+!@cuf use mod_common_mpi, only: mydev
 implicit none
 !
 private
@@ -18,15 +19,15 @@ public IBM_Mask,normal_vectors,intersect,mirrorpoints, &
        Wetting_radius
 contains
 !
-subroutine IBM_Mask(dims,n,ng,nh_d,nh_b,cell_phi_tag,Level_set,zc,zf,dl,dzc)
+subroutine IBM_Mask(n,ng,nh_d,nh_b,cell_phi_tag,Level_set,zc,zf,dl,dzc)
 implicit none
 integer, intent(in)                           :: nh_d,nh_b
-integer, intent(in), dimension(3)             :: dims,n,ng
-real(rp), intent(in), dimension(1-nh_d:)                                              :: zc,zf,dzc
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: Level_set,cell_phi_tag
-! integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: Level_set
+integer, intent(in), dimension(3)             :: n,ng
+real(rp), intent(in), dimension(1-nh_d:)                                               :: zc,zf,dzc
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout) :: cell_phi_tag
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout) :: Level_set
 real(rp), intent(in), dimension(3)       :: dl
-integer  :: i,j,k,ii,jj,ll,nn,m,number_of_divisions,dims1,dims2
+integer  :: i,j,k,ii,jj,ll,nn,m,number_of_divisions
 real(rp) :: xxx,yyy,zzz,dx,dy,dz,dxx,dyy,dzz,lxl,lyl,lzl
 real(rp) :: cell_start_x,cell_end_x,cell_start_y,cell_end_y,cell_start_z,cell_end_z
 real(rp) :: RR,x_center,y_center,z_center,z_top,z_bottom
@@ -35,6 +36,7 @@ logical  :: inside,ghost
 integer  :: n1,n2,n3,ijk_start_x,ijk_start_y,ijk_start_z,q,iperiod1,iperiod2,iperiod3
 real(rp) :: sdist1,sdist2,sdistmin,eps
 integer  :: counter
+!
 !@cuf attributes(managed) :: cell_phi_tag,Level_set,zc,zf,dzc
 !
 dx=dl(1)
@@ -62,55 +64,48 @@ iperiod1 = iperiod(1)
 iperiod2 = iperiod(2)
 iperiod3 = iperiod(3)
 !
-dims1 = dims(1)
-dims2 = dims(2)
-!
-!$acc kernels
-cell_phi_tag(:,:,:) = 1.0_rp
-Level_set(:,:,:)    = 1.0_rp
-!$acc end kernels
+ijk_start_x = ijk_start(1)
+ijk_start_y = ijk_start(2)
+ijk_start_z = ijk_start(3)
 !
 ! Wall Geometry
+!
 #if defined(_OPENACC)
-number_of_divisions = 100
+number_of_divisions = 50
 #else
 number_of_divisions = 50
 #endif
-#if defined(_OPENACC)
 if (myid == 0) print*, '*** Calculating volume fractions ***'
+!$acc enter data copyin(ijk_start_x,ijk_start_y,ijk_start_z,dx,dy,lxl,lyl,lzl,RR,x_center,y_center,z_center,z_bottom,z_top,iperiod1,iperiod2,iperiod3)
 !$acc kernels
-do k=1,n3
-#else
 do k=1,int(solid_height_ratio*n3)
-#endif
   do j=1,n2
     do i=1,n1
-      xxx =  (i+dims1*n1)*dx-0.5*dx
-      yyy =  (j+dims2*n2)*dy-0.5*dy
+      xxx =  (i+ijk_start_x-0.5_rp)*dx
+      yyy =  (j+ijk_start_y-0.5_rp)*dy
       zzz =  zc(k)
       dz  = dzc(k)
 #if defined(_OPENACC)
-      ! ghost = wall_mounted_cylinder(RR,x_center,y_center,z_bottom,z_top, &
-                                    ! xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
-      ghost = flat_wall_ghost(xxx,yyy,zzz,x_center,y_center,z_center)
+      ! ghost = wall_mounted_cylinder_ghost(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                                          ! xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
+      ghost = xGrv_ghost(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                         xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
 #else
       call GuessGhostCells(xxx,yyy,zzz,dx,dy,dz,lxl,lyl,lzl,ghost)
 #endif
       if (ghost) then
-         cell_phi_tag(i,j,k) = 0.0_rp
-         Level_set(i,j,k)    = 0.0_rp
+       Level_set(i,j,k) = 0
       endif
     enddo
   enddo
 enddo
 !$acc end kernels
+!$acc wait
+!$acc exit data copyout(ijk_start_x,ijk_start_y,dx,dy,lxl,lyl,lzl,RR,x_center,y_center,z_center,z_bottom,z_top,iperiod1,iperiod2,iperiod3)
 !
-#if defined(_OPENACC)
+!$acc enter data copyin(number_of_divisions,ijk_start_x,ijk_start_y,dx,dy,dz,lxl,lyl,lzl,RR,x_center,y_center,z_center,z_bottom,z_top,iperiod1,iperiod2,iperiod3)
 !$acc kernels
-do k=1,n3
-#else
 do k=1,int(solid_height_ratio*n3)
-#endif
 #if !defined(_OPENACC)
   if (myid.eq.0) print*, '*** Calculating volume fractions at k = ', k
 #endif
@@ -118,11 +113,11 @@ do k=1,int(solid_height_ratio*n3)
     do i=1,n1
       dz = dzc(k)
 
-      cell_start_x = (i-1+dims1*n1)*dx
-      cell_end_x   = (i  +dims1*n1)*dx
+      cell_start_x = (i+ijk_start_x-1.0_rp)*dx
+      cell_end_x   = (i+ijk_start_x-0.0_rp)*dx
 
-      cell_start_y = (j-1+dims2*n2)*dy
-      cell_end_y   = (j  +dims2*n2)*dy
+      cell_start_y = (j+ijk_start_y-1.0_rp)*dy
+      cell_end_y   = (j+ijk_start_y-0.0_rp)*dy
 
       cell_start_z = zf(k-1)
       cell_end_z   = zf(k)
@@ -142,9 +137,10 @@ do k=1,int(solid_height_ratio*n3)
         do ll = 1,number_of_divisions
            xxx = cell_start_x + (ll-1)*dxx
 #if defined(_OPENACC)
-            ! inside = wall_mounted_cylinder(RR,x_center,y_center,z_bottom,z_top, &
+            ! inside = wall_mounted_cylinder(RR,x_center,y_center,z_center,z_bottom,z_top, &
                                            ! xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
-            inside = flat_wall(xxx,yyy,zzz,x_center,y_center,z_center)
+            inside = xGrv(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                          xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
 #else
             call Solid_Surface(xxx,yyy,zzz,dx,dy,dz,lxl,lyl,lzl,inside)
 #endif
@@ -155,57 +151,133 @@ do k=1,int(solid_height_ratio*n3)
        !$acc end loop
       enddo
       !$acc end loop
-      cell_phi_tag(i,j,k) = 1.0_rp - real(counter,rp)/(1._rp*number_of_divisions**3)
+      cell_phi_tag(i,j,k) = 1.0_rp - (1._rp*counter)/(1._rp*number_of_divisions**3)
     enddo
   enddo
 enddo
 !$acc end kernels
+!$acc wait
+!$acc exit data copyout(number_of_divisions,ijk_start_x,ijk_start_y,dx,dy,dz,lxl,lyl,lzl,RR,x_center,y_center,z_center,z_bottom,z_top,iperiod1,iperiod2,iperiod3)
 !
 end subroutine IBM_Mask
 
-function wall_mounted_cylinder(RR,x_center,y_center,z_bottom,z_top, &
+function wall_mounted_cylinder_ghost(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                                     xxx,yyy,zzz,dx,dy,lx,ly,dz,iperiod)
+implicit none
+!$acc routine(wall_mounted_cylinder_ghost) seq
+logical :: wall_mounted_cylinder_ghost
+real(rp), intent(in):: xxx,yyy,zzz,dx,dy,dz,RR,x_center,y_center,z_center,z_top,z_bottom,lx,ly
+integer, dimension(3), intent(in) :: iperiod
+real(rp):: sdist1,sdist2,sdistmin,eps
+integer :: ii,jj
+
+    wall_mounted_cylinder_ghost = .false.
+    eps    = min(dx,dy)
+    sdist1 = zzz - z_top
+
+    do jj = -1,1
+      do ii = -1,1
+        sdist2 = sqrt( (xxx+ii*iperiod(1)*lx-x_center)**2 + &
+                       (yyy+jj*iperiod(2)*ly-y_center)**2) - RR
+        if((sdist1.lt.-dz).and.(sdist2.lt.-eps)) then
+          wall_mounted_cylinder_ghost = .true.
+        elseif((sdist1.gt.dz).and.(sdist2.gt.eps)) then
+          wall_mounted_cylinder_ghost = .false.
+        endif
+      enddo
+    enddo
+    if(zzz.lt.z_bottom) wall_mounted_cylinder_ghost = .true.
+
+end function wall_mounted_cylinder_ghost
+!
+function wall_mounted_cylinder(RR,x_center,y_center,z_center,z_bottom,z_top, &
                                xxx,yyy,zzz,dx,dy,lx,ly,dz,iperiod)
 implicit none
+!$acc routine(wall_mounted_cylinder) seq
 logical :: wall_mounted_cylinder
-real(rp), intent(in):: xxx,yyy,zzz,dx,dy,dz,RR,x_center,y_center,z_top,z_bottom,lx,ly
+real(rp), intent(in):: xxx,yyy,zzz,dx,dy,dz,RR,x_center,y_center,z_center,z_top,z_bottom,lx,ly
 integer, dimension(3), intent(in) :: iperiod
 real(rp):: sdist1,sdist2,sdistmin ,eps
 integer :: ii,jj
 
-     wall_mounted_cylinder = .false.
-     eps    = min(dx,dy)
-     sdist1 = zzz - z_top
+    wall_mounted_cylinder= .false.
+    eps    = min(dx,dy)
+    sdist1 = zzz - z_top
 
-     do jj = -1,1
-       do ii = -1,1
-         sdist2 = sqrt( (xxx+ii*iperiod(1)*lx-x_center)**2 + &
-                        (yyy+jj*iperiod(2)*ly-y_center)**2) - RR
-         if((sdist1.lt.-dz).and.(sdist2.lt.-eps)) then
-           wall_mounted_cylinder = .true.
-         elseif((sdist1.gt.dz).and.(sdist2.gt.eps)) then
-           wall_mounted_cylinder = .false.
-         endif
-       enddo
-     enddo
-     if(zzz.le.z_bottom) wall_mounted_cylinder = .true.
+    do jj = -1,1
+      do ii = -1,1
+        sdist2 = sqrt( (xxx+ii*iperiod(1)*lx-x_center)**2 + &
+                       (yyy+jj*iperiod(2)*ly-y_center)**2) - RR
+        if((sdist1.le.0.).and.(sdist2.le.0.)) then
+          wall_mounted_cylinder = .true.
+        elseif((sdist1.gt.0.).and.(sdist2.gt.0.)) then
+          wall_mounted_cylinder = .false.
+        endif
+      enddo
+    enddo
+    if(zzz.le.z_bottom) wall_mounted_cylinder = .true.
 
 end function wall_mounted_cylinder
-!
-function flat_wall_ghost(xxx,yyy,zzz,x_center,y_center,z_center)
+!!
+function flat_wall_ghost(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                         xxx,yyy,zzz,dx,dy,lx,ly,dz,iperiod)
 implicit none
+!$acc routine(flat_wall_ghost) seq
 logical :: flat_wall_ghost
-real(rp), intent(in):: xxx,yyy,zzz,x_center,y_center,z_center
-     flat_wall_ghost = .false.
-     if (zzz.le.z_center) flat_wall_ghost = .true.
+real(rp), intent(in):: xxx,yyy,zzz,dx,dy,dz,RR,x_center,y_center,z_center,z_top,z_bottom,lx,ly
+integer, dimension(3), intent(in) :: iperiod
+    flat_wall_ghost = .false.
+    if (zzz.le.z_center) flat_wall_ghost = .true.
 end function flat_wall_ghost
 !
-function flat_wall(xxx,yyy,zzz,x_center,y_center,z_center)
+function flat_wall(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                   xxx,yyy,zzz,dx,dy,lx,ly,dz,iperiod)
 implicit none
+!$acc routine(flat_wall) seq
 logical :: flat_wall
-real(rp), intent(in):: xxx,yyy,zzz,x_center,y_center,z_center
-     flat_wall = .false.
-     if (zzz.le.z_center) flat_wall = .true.
+real(rp), intent(in):: xxx,yyy,zzz,dx,dy,dz,RR,x_center,y_center,z_center,z_top,z_bottom,lx,ly
+integer, dimension(3), intent(in) :: iperiod
+    flat_wall = .false.
+    if (zzz.le.z_center) flat_wall = .true.
 end function flat_wall
+!!
+function xGrv_ghost(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                    xxx,yyy,zzz,dx,dy,lx,ly,dz,iperiod)
+implicit none
+!$acc routine(xGrv_ghost) seq
+logical :: xGrv_ghost
+real(rp), intent(in):: xxx,yyy,zzz,dx,dy,dz,RR,x_center,y_center,z_center,z_top,z_bottom,lx,ly
+integer, dimension(3), intent(in) :: iperiod
+logical :: cond1,cond2,cond3,cond4
+    cond1 = yyy.lt.RR
+    cond2 = yyy.gt.(ly - RR)
+    cond3 = zzz.lt.z_top
+    cond4 = zzz.lt.z_bottom
+    xGrv_ghost = .false.
+    if ((cond1.and.cond3).or. &
+        (cond2.and.cond3).or. &
+        ((.not.cond1).and.cond4).or. &
+        ((.not.cond2).and.cond4)) xGrv_ghost = .true.
+end function xGrv_ghost
+!
+function xGrv(RR,x_center,y_center,z_center,z_bottom,z_top, &
+              xxx,yyy,zzz,dx,dy,lx,ly,dz,iperiod)
+implicit none
+!$acc routine(xGrv) seq
+logical :: xGrv
+real(rp), intent(in):: xxx,yyy,zzz,dx,dy,dz,RR,x_center,y_center,z_center,z_top,z_bottom,lx,ly
+integer, dimension(3), intent(in) :: iperiod
+logical  :: cond1,cond2,cond3,cond4
+    cond1 = yyy.le.RR
+    cond2 = yyy.ge.(ly - RR)
+    cond3 = zzz.le.z_top
+    cond4 = zzz.le.z_bottom
+    xGrv = .false.
+    if ((cond1.and.cond3).or. &
+        (cond2.and.cond3).or. &
+        ((.not.cond1).and.cond4).or. &
+        ((.not.cond2).and.cond4)) xGrv = .true.
+end function xGrv
 
 Subroutine GuessGhostCells(xxx,yyy,zzz,dx,dy,dz,lx,ly,lz,ghost)
 implicit none
@@ -294,11 +366,18 @@ case('Sphe')
 
 case('Plan')
      ghost=.false.
-     x_center = xc_ibm
-     y_center = yc_ibm
-     z_center = zc_ibm
+     if (zzz.lt.zc_ibm) ghost=.true.
 
-     if (zzz.le.z_center) ghost=.true.
+case('xGrv')
+     ghost=.false.
+     cond1 = yyy.lt.r_ibm
+     cond2 = yyy.gt.(ly - r_ibm)
+     cond3 = zzz.lt.zmax_ibm
+     cond4 = zzz.lt.zmin_ibm
+     if ((cond1.and.cond3).or. &
+         (cond2.and.cond3).or. &
+         (.not.cond1.and.cond4).or. &
+         (.not.cond2.and.cond4)) ghost=.true.
 
 case('RotB')
      edge_length_of_box =0.5*ly
@@ -451,14 +530,21 @@ case('Sphe')
 
 case('Plan')
      inside=.false.
-     x_center = xc_ibm
-     y_center = yc_ibm
-     z_center = zc_ibm
-     if (zzz.le.z_center) inside=.true.
+     if (zzz.le.zc_ibm) inside=.true.
 
+case('xGrv')
+     inside=.false.
+     cond1 = yyy.le.r_ibm
+     cond2 = yyy.ge.(ly - r_ibm)
+     cond3 = zzz.le.zmax_ibm
+     cond4 = zzz.le.zmin_ibm
+     if ((cond1.and.cond3).or. &
+         (cond2.and.cond3).or. &
+         (.not.cond1.and.cond4).or. &
+         (.not.cond2.and.cond4)) inside=.true.
 
 case('RotB')
-   inside= 0
+   inside= .false.
    edge_length_of_box =0.5*ly
    A = 0.5*(ly-edge_length_of_box*(Cos_angle+Sin_angle))
    y1 = A + edge_length_of_box*Sin_angle
@@ -506,7 +592,7 @@ case('IncW')
    ! cond4 = (xxx.gt.length)
    ! if (cond3.or.cond4) inside=.false.
    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   inside= 0
+   inside= .false.
    edge_length_of_box = sqrt((2.0*lx**2) - (2.0*(0.9375*lx)**2)) 
    A = 0.5*(lx-edge_length_of_box*(Cos_angle+Sin_angle))
    x1 = A + edge_length_of_box*Sin_angle
@@ -533,28 +619,28 @@ case('IncW')
     ! cond3 = zzz.lt.z3
     ! cond4 = xxx.lt.x2
    endif
-   if (.not.cond3) inside=1
+   if (.not.cond3) inside=.true.
 
 end select
 
 end subroutine Solid_Surface
 
-Subroutine normal_vectors(dims,n,ng,nh_d,nh_b,Level_set,cell_phi_tag,nx_surf,ny_surf,nz_surf,nabs_surf,dl,dli,zc,dzc)
+Subroutine normal_vectors(n,ng,nh_d,nh_b,Level_set,cell_phi_tag,nx_surf,ny_surf,nz_surf,nabs_surf,dl,dli,zc,dzc)
 implicit none
 integer,  intent(in)                          :: nh_d,nh_b
-integer,  dimension(3), intent(in)            :: dims,n,ng
-! integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in)  :: Level_set
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in)  :: Level_set,cell_phi_tag
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out) :: nx_surf
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out) :: ny_surf
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out) :: nz_surf
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out) :: nabs_surf
+integer,  dimension(3), intent(in)            :: n,ng
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in)    :: Level_set
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in)    :: cell_phi_tag
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout) :: nx_surf
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout) :: ny_surf
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout) :: nz_surf
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout) :: nabs_surf
 real(rp), dimension(1-nh_d:), intent(in) :: zc,dzc
 real(rp), dimension(3), intent(in)  :: dl,dli
 integer , dimension(:,:,:), allocatable :: ghost_cell_tag
 real(rp), parameter :: eps = 10._rp**(-16)
 integer, dimension(3) :: iperiod
-integer  :: i,j,k,dims1,dims2
+integer  :: i,j,k,iperiod1,iperiod2,iperiod3
 real(rp) :: nx, ny, nz, n_abs, n_abs_p, vol_frac
 real(rp) :: m_av_x,m_av_y,m_av_z,normal_denum
 real(rp) :: mx1,mx2,mx3,mx4,mx5,mx6,mx7,mx8
@@ -569,9 +655,12 @@ real(rp) :: RR,x_center,y_center,z_center,z_top,z_bottom
 integer  :: Level_set_all
 logical  :: ghost,inside,ghost_cond
 integer  :: n1,n2,n3,i1,j1,k1,ijk_start_x,ijk_start_y,ijk_start_z,q,lvl_set
+!
 !@cuf attributes(managed) :: Level_set,cell_phi_tag,nx_surf,ny_surf,nz_surf,nabs_surf,zc,dzc,ghost_cell_tag
+!@cuf integer :: istat
 !
 allocate(ghost_cell_tag(1:n(1),1:n(2),1:n(3)))
+!@cuf istat = cudaMemAdvise(ghost_cell_tag, size(ghost_cell_tag), cudaMemAdviseSetReadMostly, 0)
 ghost_cell_tag(:,:,:) = 0
 !
 dx=dl(1)
@@ -594,6 +683,9 @@ z_top    = zmax_ibm
 do q=1,3
   if(cbcpre(0,q)//cbcpre(1,q).eq.'PP') iperiod(q) = 1
 enddo
+iperiod1 = iperiod(1)
+iperiod2 = iperiod(2)
+iperiod3 = iperiod(3)
 !
 dli1=dli(1)
 dli2=dli(2)
@@ -603,58 +695,64 @@ dl1=dl(1)
 dl2=dl(2)
 dl3=dl(3)
 !
-dims1 = dims(1)
-dims2 = dims(2)
+ijk_start_x = ijk_start(1)
+ijk_start_y = ijk_start(2)
+ijk_start_z = ijk_start(3)
 !
 ! Preparing normal vectors to the surfaces
-! Identifying the ghost cells               !!!UNNECESSARY!!!!!
+! Identifying the ghost cells
 !
-! do k=1,n3
- ! do j=1,n2
-   ! do i=1,n1
-       ! xxx   =  (i+dims1*n1)*dx-0.5*dx
-       ! yyy   =  (j+dims2*n2)*dy-0.5*dy
-       ! zzz   =  zc(k)
-       ! dz    =  dzc(k)
+!$acc enter data copyin(ijk_start_x,ijk_start_y,ijk_start_z,dx,dy,dz,lxl,lyl,lzl,RR,x_center,y_center,z_center,z_bottom,z_top,iperiod1,iperiod2,iperiod3)
+!$acc kernels
+do k=1,n3
+ do j=1,n2
+   do i=1,n1
+       xxx   =  (ijk_start_x+i-0.5_rp)*dx
+       yyy   =  (ijk_start_y+j-0.5_rp)*dy
+       zzz   =  zc(k)
+       dz    =  dzc(k)
 #if defined(_OPENACC)
        ! ghost = wall_mounted_cylinder(RR,x_center,y_center,z_bottom,z_top, &
-                                    ! xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
-       ! ghost = flat_wall_ghost(xxx,yyy,zzz,x_center,y_center,z_center)
+                                     ! xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
+       ghost = xGrv_ghost(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                          xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
 #else
-       ! call GuessGhostCells(xxx,yyy,zzz,dx,dy,dz,lxl,lyl,lzl,ghost)
+       call GuessGhostCells(xxx,yyy,zzz,dx,dy,dz,lxl,lyl,lzl,ghost)
 #endif
-       ! if (.not.ghost) cycle
-       ! ip = i+1
-       ! jp = j+1
-       ! kp = k+1
-       ! im = i-1
-       ! jm = j-1
-       ! km = k-1
-       ! Level_set_all = int(Level_set(im,jm,kp)) + int(Level_set(im,j,kp)) + int(Level_set(im,jp,kp)) + &
-                       ! int(Level_set(i ,jm,kp)) + int(Level_set(i ,j,kp)) + int(Level_set(i ,jp,kp)) + &
-                       ! int(Level_set(ip,jm,kp)) + int(Level_set(ip,j,kp)) + int(Level_set(ip,jp,kp)) + &
-                       ! int(Level_set(im,jm,k )) + int(Level_set(im,j,k )) + int(Level_set(im,jp,k )) + &
-                       ! int(Level_set(i ,jm,k )) + int(Level_set(i ,j,k )) + int(Level_set(i ,jp,k )) + &
-                       ! int(Level_set(ip,jm,k )) + int(Level_set(ip,j,k )) + int(Level_set(ip,jp,k )) + &
-                       ! int(Level_set(im,jm,kp)) + int(Level_set(im,j,kp)) + int(Level_set(im,jp,kp)) + &
-                       ! int(Level_set(i ,jm,km)) + int(Level_set(i ,j,km)) + int(Level_set(i ,jp,km)) + &
-                       ! int(Level_set(ip,jm,km)) + int(Level_set(ip,j,km)) + int(Level_set(ip,jp,km))
+       if (.not.ghost) cycle
+       ip = i+1
+       jp = j+1
+       kp = k+1
+       im = i-1
+       jm = j-1
+       km = k-1
+       Level_set_all = Level_set(im,jm,kp) + Level_set(im,j,kp) + Level_set(im,jp,kp) + &
+                       Level_set(i ,jm,kp) + Level_set(i ,j,kp) + Level_set(i ,jp,kp) + &
+                       Level_set(ip,jm,kp) + Level_set(ip,j,kp) + Level_set(ip,jp,kp) + &
+                       Level_set(im,jm,k ) + Level_set(im,j,k ) + Level_set(im,jp,k ) + &
+                       Level_set(i ,jm,k ) + Level_set(i ,j,k ) + Level_set(i ,jp,k ) + &
+                       Level_set(ip,jm,k ) + Level_set(ip,j,k ) + Level_set(ip,jp,k ) + &
+                       Level_set(im,jm,kp) + Level_set(im,j,kp) + Level_set(im,jp,kp) + &
+                       Level_set(i ,jm,km) + Level_set(i ,j,km) + Level_set(i ,jp,km) + &
+                       Level_set(ip,jm,km) + Level_set(ip,j,km) + Level_set(ip,jp,km)
 
-       ! if ((Level_set_all.gt.0).and.(int(Level_set(i,j,k)).eq.0)) ghost_cell_tag(i,j,k) = 1
+       if ((Level_set_all.gt.0).and.(Level_set(i,j,k).eq.0)) ghost_cell_tag(i,j,k) = 1
 
-   ! enddo
- ! enddo
-! enddo
+   enddo
+ enddo
+enddo
+!$acc end kernels
+!$acc exit data copyout(ijk_start_x,ijk_start_y,ijk_start_z,dx,dy,dz,lxl,lyl,lzl,RR,x_center,y_center,z_center,z_bottom,z_top,iperiod1,iperiod2,iperiod3)
 !
 if (myid == 0) print*, '*** Calculating normal vectors ***'
-!$acc kernels
+!$acc parallel loop collapse(3) private(mx1,mx2,mx3,mx4,mx5,mx6,mx7,my1,my2,my3,my4,my5,my6,my7,mz1,mz2,mz3,mz4,mz5,mz6,mz7,m_av_x,m_av_y,m_av_z,normal_denum)
 do k=1,n3
 #if !defined(_OPENACC)
  if (myid == 0) print*, '*** Calculating normal vectors at k = ', k
 #endif
  do j=1,n2
   do i=1,n1
-   ! if (ghost_cell_tag(i,j,k).eq.1) then
+   if (ghost_cell_tag(i,j,k).eq.1) then
 
           !i+1/2 j+1/2 k+1/2
           mx1 = ((cell_phi_tag(i+1,j  ,k  )+cell_phi_tag(i+1,j+1,k  )+cell_phi_tag(i+1,j  ,k+1)+cell_phi_tag(i+1,j+1,k+1)) - &
@@ -745,76 +843,33 @@ do k=1,n3
 
       nabs_surf(i,j,k) = sqrt(nx_surf(i,j,k)**2 + ny_surf(i,j,k)**2 + nz_surf(i,j,k)**2)
 
-     ! endif
+     endif
 
     enddo
   enddo
 enddo
-!$acc end kernels
+!$acc end parallel loop
 !
 deallocate(ghost_cell_tag)
 !
 end subroutine normal_vectors
-
-! Subroutine surface_cells(n,ng,sk,nh_d,nh_b,nabs_surf,surf_cell_i,surf_cell_j,surf_cell_k)
-! implicit none
-! integer,  dimension(3), intent(in)            :: n,ng
-! integer,  intent(in)                          :: nh_d,nh_b
-! real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: nabs_surf
-! integer,  dimension(:), intent(out) :: surf_cell_i,surf_cell_j,surf_cell_k
-! integer,  intent(out)               :: sk
-! integer,  dimension(:) :: surf_cell
-! integer  :: i,j,k,kk,kkk,n1,n2,n3
-
-! n1 = n(1)
-! n2 = n(2)
-! n3 = n(3)
-
-! surf_cell(:,:,:) = 0
-
-! do i=1,n1
-  ! do j=1,n2
-   ! kk = 0
-    ! do k=1,n3
-	 ! if (nabs_surf(i,j,k).gt.small) then
-      ! sk = kk + 1
-      ! surf_cell(kk) = k
-     ! endif
-    ! enddo
-  ! enddo
-! enddo
-
-! allocate(surf_cell_i(1:kk),surf_cell_j(1:kk),surf_cell_k(1:kk))
-
-! do k=1,sk
-  ! kkk = surf_cell(k)
-  ! do j=1,n2
-    ! do i=1,n1
-      ! surf_cell_i(kkk) = i
-      ! surf_cell_j(kkk) = j
-      ! surf_cell_k(kkk) = k
-    ! enddo
-  ! enddo
-! enddo
-
-! end subroutine surface_cells
-
-Subroutine intersect(dims,n,ng,nh_d,nh_b,nx_surf,ny_surf,nz_surf,nabs_surf,x_intersect,y_intersect,z_intersect,dl,dzc,zc,zf)
+!
+Subroutine intersect(n,ng,nh_d,nh_b,nx_surf,ny_surf,nz_surf,nabs_surf,x_intersect,y_intersect,z_intersect,dl,dzc,zc,zf)
 implicit none
 integer,  intent(in)                                           :: nh_d,nh_b
-integer,  dimension(3), intent(in)                             :: dims,n,ng
+integer,  dimension(3), intent(in)                             :: n,ng
 real(rp), dimension(3),       intent(in) :: dl
 real(rp), dimension(1-nh_d:), intent(in) :: dzc,zc,zf
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: nx_surf
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: ny_surf
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: nz_surf
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: nabs_surf
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: x_intersect
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: y_intersect
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: z_intersect
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: x_intersect
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: y_intersect
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: z_intersect
 real(rp), parameter :: eps = 10._rp**(-16)
 integer, dimension(3) :: iperiod
-integer :: i,j,k,ll,dims1,dims2
+integer :: i,j,k,ll,iperiod1,iperiod2,iperiod3
 real(rp):: nx, ny, nz, n_abs
 real(rp):: step
 real(rp):: xxx,yyy,zzz,dx,dy,dz,dxx,dyy,dzz,lxl,lyl,lzl
@@ -826,6 +881,7 @@ real(rp):: distance_ghost_intersect
 real(rp):: x_ghost,x_ghost_end,y_ghost,y_ghost_end,z_ghost
 real(rp):: RR,x_center,y_center,z_center,z_top,z_bottom
 integer :: n1,n2,n3,i1,j1,k1,ijk_start_x,ijk_start_y,ijk_start_z,q
+!
 !@cuf attributes(managed) :: nx_surf,ny_surf,nz_surf,nabs_surf,x_intersect,y_intersect,z_intersect,dzc,zc,zf
 !
 dx=dl(1)
@@ -838,17 +894,18 @@ n3=n(3)
 lxl = l(1)
 lyl = l(2)
 lzl = l(3)
-!
-dims1 = dims(1)
-dims2 = dims(2)
-!
+
 do q=1,3
   if(cbcpre(0,q)//cbcpre(1,q).eq.'PP') iperiod(q) = 1
 enddo
+iperiod1 = iperiod(1)
+iperiod2 = iperiod(2)
+iperiod3 = iperiod(3)
 !
 RR =  r_ibm
 x_center = xc_ibm
 y_center = yc_ibm
+z_center = zc_ibm
 z_bottom = zmin_ibm
 z_top    = zmax_ibm
 !
@@ -858,14 +915,11 @@ ijk_start_z = ijk_start(3)
 !
 distance_ghost_intersect= 1000.0_rp
 !
-x_intersect(:,:,:) = 0.0_rp
-y_intersect(:,:,:) = 0.0_rp
-z_intersect(:,:,:) = 0.0_rp
-!
 !***************************************************************************************
 #if defined(_OPENACC)
  if (myid == 0) print*, '*** Calculating intersection points ***'
 #endif
+!$acc enter data copyin(ijk_start_x,ijk_start_y,dx,dy,dz,lxl,lyl,lzl,step,lmax,confirmation,nx,ny,nz,n_abs,x_ghost,y_ghost,z_ghost,xxx,yyy,zzz,inside,RR,x_center,y_center,z_center,z_bottom,z_top)
 !$acc kernels
 do k=1,int(solid_height_ratio*n3)
 #if !defined(_OPENACC)
@@ -882,8 +936,8 @@ do k=1,int(solid_height_ratio*n3)
        ny =   ny_surf(i,j,k)
        nz =   nz_surf(i,j,k)
        n_abs = nabs_surf(i,j,k)
-       x_ghost = (i+dims1*n1)*dx-0.5*dx
-       y_ghost = (j+dims2*n2)*dy-0.5*dy
+       x_ghost = (ijk_start_x+i-0.5_rp)*dx
+       y_ghost = (ijk_start_y+j-0.5_rp)*dy
        z_ghost = zc(k)
        !$acc loop seq
        do ll=0,lmax
@@ -891,11 +945,10 @@ do k=1,int(solid_height_ratio*n3)
          yyy = y_ghost+ll*(ny/n_abs)*step
          zzz = z_ghost+ll*(nz/n_abs)*step
 #if defined(_OPENACC)
-         ! inside = wall_mounted_cylinder(RR,x_center,y_center,z_bottom,z_top, &
-                                        ! xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
-         inside = flat_wall(xxx,yyy,zzz,x_center,y_center,z_center)
+         inside = xGrv(RR,x_center,y_center,z_center,z_bottom,z_top, &
+                       xxx,yyy,zzz,dx,dy,lxl,lyl,dz,(/iperiod1,iperiod2,iperiod3/))
 #else
-         call Solid_Surface(xxx,yyy,zzz,dx,dy,dz,lxl,lyl,lzl,inside)
+         call Solid_Surface(xxx,yyy,zzz,dl(1),dl(2),dl(3),l(1),l(2),l(3),inside)
 #endif
          if (.not.inside) then
            x_intersect(i,j,k) = xxx
@@ -932,10 +985,11 @@ do k=1,int(solid_height_ratio*n3)
   enddo
 enddo
 !$acc end kernels
+!$acc exit data copyout(ijk_start_x,ijk_start_y,dx,dy,dz,lxl,lyl,lzl,step,lmax,confirmation,nx,ny,nz,n_abs,x_ghost,y_ghost,z_ghost,xxx,yyy,zzz,inside,RR,x_center,y_center,z_center,z_bottom,z_top)
 !
 end subroutine intersect
 
-Subroutine mirrorpoints(dims,n,ng,nh_d,nh_b,nx_surf,ny_surf,nz_surf,nabs_surf, &
+Subroutine mirrorpoints(n,ng,nh_d,nh_b,nx_surf,ny_surf,nz_surf,nabs_surf, &
                         x_intersect,y_intersect,z_intersect, &
                         x_mirror,y_mirror,z_mirror, &
                         deltan, &
@@ -943,7 +997,7 @@ Subroutine mirrorpoints(dims,n,ng,nh_d,nh_b,nx_surf,ny_surf,nz_surf,nabs_surf, &
                         dl,dzc,zc)
 implicit none
 integer,  intent(in)                                           :: nh_d,nh_b
-integer,  dimension(3), intent(in)                             :: dims,n,ng
+integer,  dimension(3), intent(in)                             :: n,ng
 real(rp), dimension(3), intent(in)                             :: dl
 real(rp), dimension(1-nh_d:), intent(in)                       :: dzc,zc
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: nx_surf
@@ -953,18 +1007,17 @@ real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: x_intersect
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: y_intersect
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: z_intersect
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: x_mirror
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: y_mirror
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: z_mirror
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: deltan
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: x_IP1
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: y_IP1
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: z_IP1
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: x_IP2
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: y_IP2
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: z_IP2
-real(rp), parameter :: eps = 10._rp**(-16)
-integer :: i,j,k,dims1,dims2
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: x_mirror
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: y_mirror
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: z_mirror
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: deltan
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: x_IP1
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: y_IP1
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: z_IP1
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: x_IP2
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: y_IP2
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: z_IP2
+integer :: i,j,k
 real(rp):: nx, ny, nz, n_abs
 real(rp):: step,step_2
 real(rp):: xxx,yyy,zzz
@@ -986,28 +1039,15 @@ n1 = n(1)
 n2 = n(2)
 n3 = n(3)
 !
-dims1 = dims(1)
-dims2 = dims(2)
-!
 ijk_start_x = ijk_start(1)
 ijk_start_y = ijk_start(2)
 ijk_start_z = ijk_start(3)
-!
-x_mirror(:,:,:) = -1000.0_rp
-y_mirror(:,:,:) = -1000.0_rp
-z_mirror(:,:,:) = -1000.0_rp
-x_IP1(:,:,:)    = -1000.0_rp
-y_IP1(:,:,:)    = -1000.0_rp
-z_IP1(:,:,:)    = -1000.0_rp
-x_IP2(:,:,:)    = -1000.0_rp
-y_IP2(:,:,:)    = -1000.0_rp
-z_IP2(:,:,:)    = -1000.0_rp
-deltan(:,:,:)   = -1000.0_rp
 !
 !***************************************************************************************
 #if defined(_OPENACC)
 if (myid.eq.0) print*, '*** Setting mirror points ***'
 #endif
+!$acc enter data copyin(ijk_start_x,ijk_start_y,dx,dy,dz,step,step_2,xxx,yyy,zzz,nx,ny,nz,n_abs)
 !$acc kernels
 do k=1,int(solid_height_ratio*n3)
 #if !defined(_OPENACC)
@@ -1019,20 +1059,20 @@ if (myid.eq.0) print*, '*** Setting mirror points at k = ', k
        dz  = dzc(k)
        step   = d_1*sqrt(dx**2 + dy**2 + dz**2)
        step_2 = d_2*sqrt(dx**2 + dy**2 + dz**2)
-
-       xxx = (i+dims1*n1)*dx-0.5*dx
-       yyy = (j+dims2*n2)*dy-0.5*dy
+       !
+       xxx = (ijk_start_x+i-0.5_rp)*dx
+       yyy = (ijk_start_y+j-0.5_rp)*dy
        zzz = zc(k)
-
+       !
        nx =   nx_surf(i,j,k)
        ny =   ny_surf(i,j,k)
        nz =   nz_surf(i,j,k)
        n_abs = nabs_surf(i,j,k)
-
+       !
        deltan(i,j,k) = sqrt( (x_intersect(i,j,k)-xxx)**2 + &
                              (y_intersect(i,j,k)-yyy)**2 + &
                              (z_intersect(i,j,k)-zzz)**2    )
-       
+       !
        if  (deltan(i,j,k).gt.sqrt(dx**2 + dy**2 + dz**2)) then
        print*, '--------------------------------------------------------------------------'
            print*, ' Error: in mirror point detection at cell-center at processor ', &
@@ -1040,14 +1080,15 @@ if (myid.eq.0) print*, '*** Setting mirror points at k = ', k
             'where the normal vector components are ', nx,ny,nz,n_abs
        print*, '--------------------------------------------------------------------------'
        endif
+       !
        x_mirror(i,j,k) = x_intersect(i,j,k)+(nx/n_abs)*step
        y_mirror(i,j,k) = y_intersect(i,j,k)+(ny/n_abs)*step
        z_mirror(i,j,k) = z_intersect(i,j,k)+(nz/n_abs)*step
-       
+       !
        x_IP1(i,j,k)    = x_mirror(i,j,k)+(nx/n_abs)*step_2
        y_IP1(i,j,k)    = y_mirror(i,j,k)+(ny/n_abs)*step_2
        z_IP1(i,j,k)    = z_mirror(i,j,k)+(nz/n_abs)*step_2
-
+       !
        x_IP2(i,j,k)    = x_IP1(i,j,k)+(nx/n_abs)*step_2
        y_IP2(i,j,k)    = y_IP1(i,j,k)+(ny/n_abs)*step_2
        z_IP2(i,j,k)    = z_IP1(i,j,k)+(nz/n_abs)*step_2
@@ -1056,10 +1097,11 @@ if (myid.eq.0) print*, '*** Setting mirror points at k = ', k
   enddo
 enddo
 !$acc end kernels
+!$acc exit data copyout(ijk_start_x,ijk_start_y,dx,dy,dz,step,step_2,xxx,yyy,zzz,nx,ny,nz,n_abs)
 !
 end subroutine mirrorpoints
 
-Subroutine mirrorpoints_ijk(dims,n,ng,nh_d,nh_b,nabs_surf,x_mirror,y_mirror,z_mirror, &
+Subroutine mirrorpoints_ijk(n,ng,nh_d,nh_b,nabs_surf,x_mirror,y_mirror,z_mirror, &
                             x_IP1,y_IP1,z_IP1,x_IP2,y_IP2,z_IP2, &
                             i_mirror,j_mirror,k_mirror, &
                             i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
@@ -1067,9 +1109,9 @@ Subroutine mirrorpoints_ijk(dims,n,ng,nh_d,nh_b,nabs_surf,x_mirror,y_mirror,z_mi
 
 implicit none
 integer,  intent(in)                                           :: nh_d,nh_b
-integer,  dimension(3), intent(in)                             :: dims,n,ng
+integer,  dimension(3), intent(in)                             :: n,ng
 real(rp), dimension(1-nh_d:), intent(in)                       :: zf
-real(rp), dimension(3)    ,  intent(in)                        :: dl
+real(rp), dimension(3)      , intent(in)                       :: dl
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: nabs_surf
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: x_mirror
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: y_mirror
@@ -1080,16 +1122,16 @@ real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: x_IP2
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: y_IP2
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in) :: z_IP2
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: i_mirror
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: j_mirror
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: k_mirror
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: i_IP1
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: j_IP1
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: k_IP1
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: i_IP2
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: j_IP2
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(out):: k_IP2
-integer :: i,j,k,ll,m,nn,dims1,dims2
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: i_mirror
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: j_mirror
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: k_mirror
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: i_IP1
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: j_IP1
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: k_IP1
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: i_IP2
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: j_IP2
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(inout):: k_IP2
+integer :: i,j,k,ll,m,nn
 real(rp):: nx, ny, nz, n_abs
 real(rp):: xxx,yyy,zzz
 real(rp):: dx,dy
@@ -1112,23 +1154,11 @@ n1=n(1)
 n2=n(2)
 n3=n(3)
 !
-dims1 = dims(1)
-dims2 = dims(2)
-!
-i_mirror(:,:,:)    =   -1000
-j_mirror(:,:,:)    =   -1000
-k_mirror(:,:,:)    =   -1000
-i_IP1(:,:,:)       =   -1000
-j_IP1(:,:,:)       =   -1000
-k_IP1(:,:,:)       =   -1000
-i_IP2(:,:,:)       =   -1000
-j_IP2(:,:,:)       =   -1000
-k_IP2(:,:,:)       =   -1000
-!
 !***************************************************************************************
 #if defined(_OPENACC)
 if (myid.eq.0) print*, '*** Determining mirror point indices ***'
 #endif
+!$acc enter data copyin(ijk_start_x,ijk_start_y,dx,dy,xxx,yyy,zzz,cell_start_x,cell_end_x,cell_start_y,cell_end_y,cell_start_z,cell_end_z)
 !$acc kernels
 do k=1,int(solid_height_ratio*n3)
 #if !defined(_OPENACC)
@@ -1146,12 +1176,12 @@ if (myid.eq.0) print*, '*** Determining mirror point indices at k = ', k
          do m = 1-nh_b,n2+nh_b
            !$acc loop seq
            do nn = 1-nh_b,n1+nh_b
+              cell_start_x = (ijk_start_x+nn-1.0_rp)*dx
+              cell_end_x   = (ijk_start_x+nn-0.0_rp)*dx
+              cell_start_y = (ijk_start_y+m -1.0_rp)*dy
+              cell_end_y   = (ijk_start_y+m -0.0_rp)*dy
               cell_start_z = zf(ll-1)
               cell_end_z   = zf(ll)
-              cell_start_y = (m -1+dims2*n2)*dy
-              cell_end_y   = (m   +dims2*n2)*dy
-              cell_start_x = (nn-1+dims1*n1)*dx
-              cell_end_x   = (nn  +dims1*n1)*dx
              if ((yyy.ge.cell_start_y).and.(yyy.lt.cell_end_y).and.&
                  (zzz.ge.cell_start_z).and.(zzz.lt.cell_end_z).and.&
                  (xxx.ge.cell_start_x).and.(xxx.lt.cell_end_x)) then
@@ -1184,10 +1214,12 @@ if (myid.eq.0) print*, '*** Determining mirror point indices at k = ', k
  enddo
 enddo
 !$acc end kernels
+!$acc exit data copyout(ijk_start_x,ijk_start_y,dx,dy,xxx,yyy,zzz,cell_start_x,cell_end_x,cell_start_y,cell_end_y,cell_start_z,cell_end_z)
 !
 #if defined(_OPENACC)
 if (myid.eq.0) print*, '*** Determining interpolation point 1 indices ***'
 #endif
+!$acc enter data copyin(ijk_start_x,ijk_start_y,dx,dy,xxx,yyy,zzz,cell_start_x,cell_end_x,cell_start_y,cell_end_y,cell_start_z,cell_end_z)
 !$acc kernels
 do k=1,int(solid_height_ratio*n3)
 #if !defined(_OPENACC)
@@ -1205,12 +1237,12 @@ if (myid.eq.0) print*, '*** Determining interpolation point 1 indices at k = ', 
          do m = 1-nh_b,n2+nh_b
            !$acc loop seq
            do nn = 1-nh_b,n1+nh_b
+              cell_start_x = (ijk_start_x+nn-1.0_rp)*dx
+              cell_end_x   = (ijk_start_x+nn-0.0_rp)*dx
+              cell_start_y = (ijk_start_y+m -1.0_rp)*dy
+              cell_end_y   = (ijk_start_y+m -0.0_rp)*dy
               cell_start_z = zf(ll-1)
               cell_end_z   = zf(ll)
-              cell_start_y = (m -1+dims2*n2)*dy
-              cell_end_y   = (m   +dims2*n2)*dy
-              cell_start_x = (nn-1+dims1*n1)*dx
-              cell_end_x   = (nn  +dims1*n1)*dx
              if ((yyy.ge.cell_start_y).and.(yyy.lt.cell_end_y).and.&
                  (zzz.ge.cell_start_z).and.(zzz.lt.cell_end_z).and.&
                  (xxx.ge.cell_start_x).and.(xxx.lt.cell_end_x)) then
@@ -1243,10 +1275,12 @@ if (myid.eq.0) print*, '*** Determining interpolation point 1 indices at k = ', 
  enddo
 enddo
 !$acc end kernels
+!$acc exit data copyout(ijk_start_x,ijk_start_y,dx,dy,xxx,yyy,zzz,cell_start_x,cell_end_x,cell_start_y,cell_end_y,cell_start_z,cell_end_z)
 !
 #if defined(_OPENACC)
 if (myid.eq.0) print*, '*** Determining interpolation point 2 indices ***'
 #endif
+!$acc enter data copyin(ijk_start_x,ijk_start_y,dx,dy,xxx,yyy,zzz,cell_start_x,cell_end_x,cell_start_y,cell_end_y,cell_start_z,cell_end_z)
 !$acc kernels
 do k=1,int(solid_height_ratio*n3)
 #if !defined(_OPENACC)
@@ -1264,12 +1298,12 @@ if (myid.eq.0) print*, '*** Determining interpolation point 2 indices at k = ', 
          do m = 1-nh_b,n2+nh_b
            !$acc loop seq
            do nn = 1-nh_b,n1+nh_b
+              cell_start_x = (ijk_start_x+nn-1.0_rp)*dx
+              cell_end_x   = (ijk_start_x+nn-0.0_rp)*dx
+              cell_start_y = (ijk_start_y+m -1.0_rp)*dy
+              cell_end_y   = (ijk_start_y+m -0.0_rp)*dy
               cell_start_z = zf(ll-1)
               cell_end_z   = zf(ll)
-              cell_start_y = (m -1+dims2*n2)*dy
-              cell_end_y   = (m   +dims2*n2)*dy
-              cell_start_x = (nn-1+dims1*n1)*dx
-              cell_end_x   = (nn  +dims1*n1)*dx
              if ((yyy.ge.cell_start_y).and.(yyy.lt.cell_end_y).and.&
                  (zzz.ge.cell_start_z).and.(zzz.lt.cell_end_z).and.&
                  (xxx.ge.cell_start_x).and.(xxx.lt.cell_end_x)) then
@@ -1302,10 +1336,11 @@ if (myid.eq.0) print*, '*** Determining interpolation point 2 indices at k = ', 
  enddo
 enddo
 !$acc end kernels
+!$acc exit data copyout(ijk_start_x,ijk_start_y,dx,dy,xxx,yyy,zzz,cell_start_x,cell_end_x,cell_start_y,cell_end_y,cell_start_z,cell_end_z)
 !
 end Subroutine mirrorpoints_ijk
-
-Subroutine InterpolationWeights(dims,n,ng,nh_d,nh_b,nabs_surf,Level_set, &
+!
+Subroutine InterpolationWeights(n,ng,nh_d,nh_b,nabs_surf,Level_set, &
                                 x_IP1,y_IP1,z_IP1, &
                                 x_IP2,y_IP2,z_IP2, &
                                 i_IP1,j_IP1,k_IP1, &
@@ -1314,32 +1349,31 @@ Subroutine InterpolationWeights(dims,n,ng,nh_d,nh_b,nabs_surf,Level_set, &
                                 dl,dzc,zc)
 implicit none
 integer,  intent(in)                                          :: nh_d,nh_b
-integer,  dimension(3), intent(in)                            :: dims,n,ng
+integer,  dimension(3), intent(in)                            :: n,ng
 real(rp), dimension(3), intent(in)                            :: dl
 real(rp), dimension(1-nh_d:), intent(in)                      :: zc,dzc
-! integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: Level_set
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: Level_set
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: nabs_surf
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: x_IP1
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: y_IP1
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: z_IP1
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: x_IP2
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: y_IP2
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: z_IP2
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: i_IP1
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: j_IP1
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: k_IP1
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: i_IP2
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: j_IP2
-integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b), intent(in):: k_IP2
-real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b,1:7), intent(out) :: WP1,WP2
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: Level_set
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: nabs_surf
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: x_IP1
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: y_IP1
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: z_IP1
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: x_IP2
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: y_IP2
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: z_IP2
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: i_IP1
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: j_IP1
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: k_IP1
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: i_IP2
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: j_IP2
+integer , dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),     intent(in   ) :: k_IP2
+real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b,1:7), intent(inout) :: WP1,WP2
 real(rp):: x1(7),y1(7),z1(7),x2(7),y2(7),z2(7)
 real(rp):: h1(7),h2(7)
 real(rp):: xx1,xx2,yy1,yy2,zz1,zz2,dx,dy
 real(rp):: contribution1(7),contribution2(7)
 integer :: i_p_1(7),j_p_1(7),k_p_1(7),i_p_2(7),j_p_2(7),k_p_2(7)
 integer :: ii,i,j,k,ii1,ii2,jj1,jj2,kk1,kk2
-integer :: n1,n2,n3,ijk_start_x,ijk_start_y,ijk_start_z,dims1,dims2
+integer :: n1,n2,n3,ijk_start_x,ijk_start_y,ijk_start_z
 logical :: cond11,cond12,cond21,cond22
 !@cuf attributes(managed) :: nabs_surf,Level_set
 !@cuf attributes(managed) :: x_IP1,y_IP1,z_IP1,x_IP2,y_IP2,z_IP2
@@ -1357,15 +1391,12 @@ ijk_start_x = ijk_start(1)
 ijk_start_y = ijk_start(2)
 ijk_start_z = ijk_start(3)
 !
-dims1 = dims(1)
-dims2 = dims(2)
-!
-WP1(:,:,:,:) = 0.0_rp
-WP2(:,:,:,:) = 0.0_rp
-!
 #if defined(_OPENACC)
 if (myid.eq.0) print*, '*** Calculating Interpolation Weights ***'
 #endif
+!$acc enter data copyin(solid_height_ratio,n1,n2,n3,ijk_start_x,ijk_start_y,dx,dy)
+!$acc enter data create(xx1,xx2,yy1,yy2,zz1,zz2,cond11,cond12,cond21,cond22,ii1,ii2,jj1,jj2,kk1,kk2)
+!$acc enter data create(x1(:),y1(:),z1(:),x2(:),y2(:),z2(:),h1(:),h2(:),contribution1(:),contribution2(:),i_p_1(:),j_p_1(:),k_p_1(:),i_p_2(:),j_p_2(:),k_p_2(:))
 !$acc kernels
 do k = 1,int(solid_height_ratio*n3)
 #if !defined(_OPENACC)
@@ -1476,21 +1507,22 @@ if (myid.eq.0) print*, '*** Calculating Interpolation Weights at k = ', k
          k_p_2(7) = kk2
 
         do ii = 1,7
-           cond11 = (Level_set(i_p_1(ii),j_p_1(ii),k_p_1(ii)).gt.0.5_rp)
+           cond11 = (Level_set(i_p_1(ii),j_p_1(ii),k_p_1(ii)).eq.1)
            cond12 = (nabs_surf(i_p_1(ii),j_p_1(ii),k_p_1(ii)).eq.0.0_rp)
-           cond21 = (Level_set(i_p_2(ii),j_p_2(ii),k_p_2(ii)).gt.0.5_rp)
+           cond21 = (Level_set(i_p_2(ii),j_p_2(ii),k_p_2(ii)).eq.1)
            cond22 = (nabs_surf(i_p_2(ii),j_p_2(ii),k_p_2(ii)).eq.0.0_rp)
 
-           ! if (cond11.and.cond21) contribution1(ii) = 1.0_rp
-           if (cond11) contribution1(ii) = 1.0_rp
-           if (cond21) contribution2(ii) = 1.0_rp
+           if (cond11.and.cond12) contribution1(ii) = 1.0_rp
+           if (cond21.and.cond22) contribution1(ii) = 1.0_rp
+           ! if (cond11) contribution1(ii) = 1.0_rp
+           ! if (cond21) contribution2(ii) = 1.0_rp
 
-           x1(ii) = (i_p_1(ii)+dims1*n1)*dx-0.5*dx
-           y1(ii) = (j_p_1(ii)+dims2*n2)*dy-0.5*dy
-           z1(ii) =  zc(k_p_1(ii))
-           x2(ii) = (i_p_2(ii)+dims1*n1)*dx-0.5*dx
-           y2(ii) = (j_p_2(ii)+dims2*n2)*dy-0.5*dy
-           z2(ii) =  zc(k_p_2(ii))
+          x1(ii) = (ijk_start_x+i_p_1(ii)-0.5_rp)*dx
+          y1(ii) = (ijk_start_y+j_p_1(ii)-0.5_rp)*dy
+          z1(ii) =  zc(k_p_1(ii))
+          x2(ii) = (ijk_start_x+i_p_2(ii)-0.5_rp)*dx
+          y2(ii) = (ijk_start_y+j_p_2(ii)-0.5_rp)*dy
+          z2(ii) =  zc(k_p_2(ii))
         enddo
 
         do ii = 1,7
@@ -1533,6 +1565,9 @@ if (myid.eq.0) print*, '*** Calculating Interpolation Weights at k = ', k
   enddo
 enddo
 !$acc end kernels
+!$acc exit data copyout(solid_height_ratio,n1,n2,n3,ijk_start_x,ijk_start_y,dx,dy)
+!$acc exit data copyout(xx1,xx2,yy1,yy2,zz1,zz2,cond11,cond12,cond21,cond22,ii1,ii2,jj1,jj2,kk1,kk2)
+!$acc exit data copyout(x1(:),y1(:),z1(:),x2(:),y2(:),z2(:),h1(:),h2(:),contribution1(:),contribution2(:),i_p_1(:),j_p_1(:),k_p_1(:),i_p_2(:),j_p_2(:),k_p_2(:))
 !
 end subroutine InterpolationWeights
 
@@ -1549,7 +1584,7 @@ real(rp), dimension(1-nh_v:n(1)+nh_v,1-nh_v:n(2)+nh_v,1-nh_v:n(3)+nh_v),    inte
 integer,  dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b),    intent(in) :: i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2
 real(rp), dimension(1-nh_b:n(1)+nh_b,1-nh_b:n(2)+nh_b,1-nh_b:n(3)+nh_b,1:7),intent(in) :: WP1,WP2
 real(rp), intent(out) :: BB
-real(rp), parameter  :: eps = 10._rp**(-16)
+real(rp), parameter   :: eps = 10._rp**(-16)
 real(rp) :: q_1,WW1_1,WW2_1,WW3_1,WW4_1,WW5_1,WW6_1,WW7_1,B1_1,B2_1,B3_1,B4_1,B5_1,B6_1,B7_1
 real(rp) :: q_2,WW1_2,WW2_2,WW3_2,WW4_2,WW5_2,WW6_2,WW7_2,B1_2,B2_2,B3_2,B4_2,B5_2,B6_2,B7_2
 real(rp) :: BB1,BB2
@@ -1892,9 +1927,9 @@ n2=n(2)
 n3=n(3)
 !
 !$acc parallel loop collapse(3)
-do k=1,n3
- do j=1,n2
-  do i=1,n1
+do k=0,n3
+ do j=0,n2
+  do i=0,n1
     ! if (slip_length.gt.small) then
        ! if (.not. ((cell_u_tag(i,j,k).lt.1).and.(cell_u_tag(i,j,k).gt.small))) then
           ! uu(i,j,k)=cell_u_tag(i,j,k)*uu(i,j,k)
@@ -1977,7 +2012,7 @@ max_processor = 0
 confirmation = .false.
 delta_y = 0._rp
 delta_z = 0._rp
-!
+
   i=int(n1/2)
   do j=1,n2
     do k=1,n3
@@ -1988,7 +2023,7 @@ delta_z = 0._rp
 
 
 
-          if (phi_m.gt.0.0_rp) then
+          if (phi_m.gt.1.0e-8) then
            j_min(ijk_start_y+1) = real((j+ijk_start_y),rp)
            k_min(ijk_start_y+1) = real(k,rp)
            confirmation = .true.
@@ -2006,7 +2041,7 @@ delta_z = 0._rp
           call interpolation_mirror((/n1,n2,n3/),nv,nb,vof,i,j,k, &
                                     i_IP1,j_IP1,k_IP1,i_IP2,j_IP2,k_IP2, &
                                     WP1,WP2,phi_m)
-          if ((phi_m).gt.0.0_rp) then
+          if ((phi_m).gt.1.0e-8) then
            j_max(ijk_start_y+1) = real((j+ijk_start_y),rp)
            k_max(ijk_start_y+1) = real(k,rp)
            confirmation = .true.

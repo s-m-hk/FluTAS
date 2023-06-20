@@ -366,13 +366,13 @@ contains
 #endif
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  ! Routine to be called by applications to initialise this library
+  ! Routine to be called by applications to initialize this library
   !   INPUT:
   !     nx, ny, nz   - global data dimension
   !     p_row, p_col - 2D processor grid
   !   OUTPUT:
   !     p_row, p_col - best 2D processor grid if using autotuning
-  !     all internal data structures initialised properly
+  !     all internal data structures initialized properly
   !     library ready to use
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   subroutine decomp_2d_init(nx,ny,nz,p_row,p_col,periodic_bc)
@@ -714,7 +714,7 @@ contains
                max(decomp%ysz(1)*decomp%ysz(2)*decomp%ysz(3), &
                    decomp%zsz(1)*decomp%zsz(2)*decomp%zsz(3))))
 #if defined(_EVEN)
-    ! padded alltoall optimisation may need larger buffer space
+    ! padded alltoall optimization may need larger buffer space
     buf_size = max(buf_size, &
          max(decomp%x1count*dims(1),decomp%y2count*dims(2)) ) 
 #endif
@@ -874,7 +874,7 @@ contains
   !   - handles uneven distribution properly 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 
   subroutine distribute(data1,proc,st,en,sz)
-  
+
     implicit none
     ! data1 -- data size in any dimension to be partitioned
     ! proc  -- number of processors in that dimension
@@ -944,7 +944,7 @@ contains
   ! Prepare the send / receive buffers for MPI_ALLTOALLV communications
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   subroutine prepare_buffer(decomp)
-    
+
     implicit none
     
     TYPE(DECOMP_INFO), intent(INOUT) :: decomp

@@ -55,7 +55,7 @@ module mod_param
   real(rp)        , dimension(0:1,3) ::  bcvof
   real(rp) :: xc, yc, zc, r
   real(rp) :: sigma
-  logical  :: late_init
+  logical  :: late_init, dynamic_angle
   integer  :: nbub=0, i_b,i_late_init
 #if defined(_USE_IBM)
   !

@@ -1,6 +1,10 @@
 !
 ! SPDX-License-Identifier: MIT
 !
+#define _FAST_KERNELS_1
+#define _FAST_KERNELS_2
+#define _FAST_KERNELS_3
+#define _FAST_KERNELS_4
 module mod_vof
   !
   ! based on:
@@ -2435,6 +2439,22 @@ module mod_vof
               ! enddo
             ! enddo
             !
+          enddo
+        enddo
+      enddo
+      !$acc end kernels
+    case('layer')
+      eps    = dl(3)
+      epsbox = dlbox(3)
+      grid_vol_ratio = product(dlbox(:))/product(dl(:))
+      !$acc kernels
+      do k=1,n(3)
+        z = z_c(k)
+        do j=1,n(2)
+         y = (j+ijk_start(2)-0.5_rp)*dl(2)
+          do i=1,n(1)
+          x = (i+ijk_start(1)-0.5_rp)*dl(1)
+           if((z.le.zmax_ibm).and.(x.ge.r*dl(1)).and.(x.le.(lx-r*dl(1)))) vof(i,j,k) = 1.0_rp
           enddo
         enddo
       enddo

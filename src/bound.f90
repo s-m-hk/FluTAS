@@ -10,7 +10,7 @@ module mod_bound
   implicit none
   !
   private
-  public  :: bounduvw, boundp, updt_rhs_b
+  public  :: bounduvw, boundp, updt_rhs_b, set_bc, updthalo
   !
   contains
   !
@@ -955,7 +955,9 @@ module mod_bound
     !@cuf attributes(managed) :: p
     !
     integer :: i,j,k, q, lb1, lb2
-    !integer :: requests(4), statuses(MPI_STATUS_SIZE,4)
+#if defined(_ASYNC_HALO)
+    integer :: requests(4)
+#endif
     !
     !  this subroutine updates the halos that store info
     !  from the neighboring computational sub-domain
@@ -1000,12 +1002,24 @@ module mod_bound
       enddo
 #else
      do i = 0,nh-1
+#if !defined(_ASYNC_HALO)
       call MPI_SENDRECV(p(1+i    ,1-nh,1-nh),1,halo,left ,0, &
                         p(nx+1+i ,1-nh,1-nh),1,halo,right,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
       call MPI_SENDRECV(p(nx-i   ,1-nh,1-nh),1,halo,right,0, &
                         p(0-i    ,1-nh,1-nh),1,halo,left ,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
+#else
+      call MPI_IRECV( p(nx+1+i,1-nh,1-nh),1,halo,right,0, &
+                     MPI_COMM_WORLD,requests(1),ierr)
+      call MPI_IRECV( p(0-i   ,1-nh,1-nh),1,halo,left,1, &
+                     MPI_COMM_WORLD,requests(2),ierr)
+      call MPI_ISSEND(p(1+i   ,1-nh,1-nh),1,halo,left,0, &
+                     MPI_COMM_WORLD,requests(3),ierr)
+      call MPI_ISSEND(p(nx-i  ,1-nh,1-nh),1,halo,right,1, &
+                     MPI_COMM_WORLD,requests(4),ierr)
+      call MPI_WAITALL(4,requests,MPI_STATUSES_IGNORE,ierr)
+#endif
      enddo
 #endif
     case(2) ! y direction
@@ -1047,12 +1061,24 @@ module mod_bound
       enddo
 #else
      do j = 0,nh-1
+#if !defined(_ASYNC_HALO)
       call MPI_SENDRECV(p(1-nh, 1+j    ,1-nh),1,halo,front,0, &
                         p(1-nh, ny+1+j ,1-nh),1,halo,back ,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
       call MPI_SENDRECV(p(1-nh, ny-j, 1-nh),1,halo,back ,0, &
                         p(1-nh, 0-j , 1-nh),1,halo,front,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
+#else
+       call MPI_IRECV( p(1-nh,ny+1+j,1-nh),1,halo,back ,0, &
+                      MPI_COMM_WORLD,requests(1),ierr)
+       call MPI_IRECV( p(1-nh,0-j   ,1-nh),1,halo,front,1, &
+                      MPI_COMM_WORLD,requests(2),ierr)
+       call MPI_ISSEND(p(1-nh,1+j   ,1-nh),1,halo,front,0, &
+                      MPI_COMM_WORLD,requests(3),ierr)
+       call MPI_ISSEND(p(1-nh,ny-j  ,1-nh),1,halo,back ,1, &
+                      MPI_COMM_WORLD,requests(4),ierr)
+       call MPI_WAITALL(4,requests,MPI_STATUSES_IGNORE,ierr)
+#endif
      enddo
 #endif
     case(3) ! z direction
@@ -1094,18 +1120,30 @@ module mod_bound
       enddo
 #else
      do k = 0,nh-1
+#if !defined(_ASYNC_HALO)
       call MPI_SENDRECV(p(1-nh, 1-nh, 1+k   ),1,halo,bottom,0, &
                         p(1-nh, 1-nh, nz+1+k),1,halo,top   ,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
       call MPI_SENDRECV(p(1-nh, 1-nh, nz-k),1,halo,top   ,0, &
                         p(1-nh, 1-nh, 0-k),1,halo,bottom ,0, &
                         comm_cart,MPI_STATUS_IGNORE,ierr)
+#else
+       call MPI_IRECV( p(1-nh, 1-nh, nz+1+k),1,halo,top,0, &
+                      MPI_COMM_WORLD,requests(1),ierr)
+       call MPI_IRECV( p(1-nh, 1-nh, 0-k),1,halo,bottom,1, &
+                      MPI_COMM_WORLD,requests(2),ierr)
+       call MPI_ISSEND(p(1-nh, 1-nh, 1+k   ),1,halo,bottom,0, &
+                      MPI_COMM_WORLD,requests(3),ierr)
+       call MPI_ISSEND(p(1-nh, 1-nh, nz-k),1,halo,top,1, &
+                      MPI_COMM_WORLD,requests(4),ierr)
+       call MPI_WAITALL(4,requests,MPI_STATUSES_IGNORE,ierr)
+#endif
      enddo
 #endif
     !
     end select
     !
-    !
   end subroutine updthalo
   !
+!
 end module mod_bound

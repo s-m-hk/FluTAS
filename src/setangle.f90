@@ -10,7 +10,11 @@ use mod_types
 !@cuf use cudafor
 !@cuf use mod_common_mpi, only: mydev
 implicit none
+#if defined(_SINGLE_PRECISION)
 real(rp), parameter :: eps = 10._rp**(-16)
+#else
+real(rp), parameter :: eps = 10._rp**(-8)
+#endif
 !
 private
 public  :: setangle

@@ -55,9 +55,11 @@ module mod_param
   real(rp)        , dimension(0:1,3) ::  bcvof
   real(rp) :: xc, yc, zc, r
   real(rp) :: sigma
-  logical  :: late_init
+  logical  :: late_init, dynamic_angle
   integer  :: nbub=0, i_b,i_late_init
+  !
 #if defined(_USE_IBM)
+  !
   !
   character(len=4) :: surface_type
   real(rp) :: xc_ibm, yc_ibm, zc_ibm, r_ibm
@@ -180,6 +182,7 @@ module mod_param
       read(iunit,*) sigma
       read(iunit,*) late_init, i_late_init
       read(iunit,*) theta1,theta2
+      read(iunit,*) dynamic_angle
     else
       if(myid.eq.0) print*, 'Error reading the vof.in input file' 
       if(myid.eq.0) print*, 'Input file missing or incomplete' 
@@ -241,7 +244,7 @@ module mod_param
         read(iunit,*) Rotation_angle
         read(iunit,*) d1,d2
       else
-        if(myid.eq.0) print*, 'Error reading the IBM input file'
+        if(myid.eq.0) print*, 'Error reading IBM input file'
         if(myid.eq.0) print*, 'Aborting...'
         call MPI_FINALIZE(ierr)
         call exit
